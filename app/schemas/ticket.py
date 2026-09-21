@@ -42,3 +42,12 @@ class TicketResponse(BaseModel):
     status: TicketStatus
     created_at: datetime
     updated_at: datetime
+
+
+class TicketListResponse(BaseModel):
+    """Paginated tickets response."""
+
+    items: list[TicketResponse]
+    total: int
+    page: int
+    page_size: int

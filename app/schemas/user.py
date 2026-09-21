@@ -30,3 +30,12 @@ class UserResponse(BaseModel):
     email: EmailStr
     created_at: datetime
     updated_at: datetime
+
+
+class UserListResponse(BaseModel):
+    """Paginated users response."""
+
+    items: list[UserResponse]
+    total: int
+    page: int
+    page_size: int

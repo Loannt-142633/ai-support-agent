@@ -1,21 +1,19 @@
-"""Alembic revision template."""
-
-"""create initial tables"
+"""Create initial tables.
 
 Revision ID: 725477bbd989
 Revises: 
 Create Date: 2026-09-21 15:32:41.709880
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = '725477bbd989'
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -31,15 +29,24 @@ def upgrade() -> None:
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_table('tickets',
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('user_id', sa.Uuid(), nullable=False),
+    sa.Column('user_id', sa.Uuid(), nullable=True),
     sa.Column('title', sa.String(length=200), nullable=False),
     sa.Column('description', sa.Text(), nullable=False),
-    sa.Column('category', sa.Enum('GENERAL', 'BILLING', 'TECHNICAL', name='ticketcategory'), nullable=False),
-    sa.Column('priority', sa.Enum('LOW', 'MEDIUM', 'HIGH', 'URGENT', name='ticketpriority'), nullable=False),
-    sa.Column('status', sa.Enum('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED', name='ticketstatus'), nullable=False),
+    sa.Column(
+        'category', sa.Enum('general', 'billing', 'technical', name='ticketcategory'),
+        nullable=False,
+    ),
+    sa.Column(
+        'priority', sa.Enum('low', 'medium', 'high', 'urgent', name='ticketpriority'),
+        nullable=False,
+    ),
+    sa.Column(
+        'status', sa.Enum('open', 'in_progress', 'resolved', 'closed', name='ticketstatus'),
+        nullable=False,
+    ),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_tickets_user_id'), 'tickets', ['user_id'], unique=False)

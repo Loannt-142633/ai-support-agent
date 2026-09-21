@@ -31,6 +31,4 @@ class User(Base):
         nullable=False,
     )
 
-    tickets: Mapped[list["Ticket"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
-    )
+    tickets: Mapped[list["Ticket"]] = relationship(back_populates="user", passive_deletes=True)

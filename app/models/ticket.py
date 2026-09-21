@@ -46,17 +46,25 @@ class Ticket(Base):
     __tablename__ = "tickets"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[TicketCategory] = mapped_column(
-        Enum(TicketCategory), default=TicketCategory.GENERAL, nullable=False
+        Enum(TicketCategory, values_callable=lambda enum: [item.value for item in enum]),
+        default=TicketCategory.GENERAL,
+        nullable=False,
     )
     priority: Mapped[TicketPriority] = mapped_column(
-        Enum(TicketPriority), default=TicketPriority.MEDIUM, nullable=False
+        Enum(TicketPriority, values_callable=lambda enum: [item.value for item in enum]),
+        default=TicketPriority.MEDIUM,
+        nullable=False,
     )
     status: Mapped[TicketStatus] = mapped_column(
-        Enum(TicketStatus), default=TicketStatus.OPEN, nullable=False
+        Enum(TicketStatus, values_callable=lambda enum: [item.value for item in enum]),
+        default=TicketStatus.OPEN,
+        nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

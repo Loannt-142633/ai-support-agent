@@ -1,32 +1,22 @@
-"""Database engine and session dependency."""
+"""Async PostgreSQL engine and session dependency."""
 
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
 
-
-def _engine_kwargs(database_url: str) -> dict[str, object]:
-    if database_url.startswith("sqlite"):
-        return {"connect_args": {"check_same_thread": False}}
-    return {}
-
-
-engine = create_engine(
+engine = create_async_engine(
     get_settings().database_url,
     pool_pre_ping=True,
-    **_engine_kwargs(get_settings().database_url),
 )
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+SessionLocal = async_sessionmaker(
+    bind=engine, class_=AsyncSession, autoflush=False, expire_on_commit=False
+)
 
 
-def get_db() -> Generator[Session, None, None]:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield a request-scoped database session."""
 
-    session = SessionLocal()
-    try:
+    async with SessionLocal() as session:
         yield session
-    finally:
-        session.close()

@@ -28,7 +28,8 @@ ai-support-agent/
 
 ## PostgreSQL
 
-The application uses PostgreSQL through SQLAlchemy and the `psycopg` driver.
+The application uses PostgreSQL asynchronously through SQLAlchemy and the
+`psycopg` async driver.
 Start the local database with Docker:
 
 ```powershell
@@ -44,6 +45,9 @@ Apply migrations:
 ```powershell
 alembic upgrade head
 ```
+
+The database layer uses `AsyncSession`; transaction commit and rollback are
+owned by application services, while routes only handle HTTP mapping.
 
 ## Run
 
