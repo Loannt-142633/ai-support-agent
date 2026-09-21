@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.ticket_ai_analysis import TicketAIAnalysis
     from app.models.user import User
 
 
@@ -77,3 +78,6 @@ class Ticket(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="tickets")
+    ai_analyses: Mapped[list["TicketAIAnalysis"]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan"
+    )
