@@ -1,10 +1,5 @@
-"""LLM boundary used by future support-answer workflows."""
+"""Backward-compatible import for the LLM abstraction."""
 
-from typing import Protocol
+from app.llm.llm import LLMClient
 
-
-class LLMClient(Protocol):
-    """Provider-agnostic contract for language model adapters."""
-
-    def generate(self, prompt: str) -> str:
-        """Generate a response for a prompt."""
+__all__ = ["LLMClient"]
