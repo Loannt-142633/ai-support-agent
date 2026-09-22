@@ -29,9 +29,6 @@ Return only the requested structured output.
 
 Ticket title: {ticket.title}
 Ticket description: {ticket.description}
-Current category: {ticket.category or "unknown"}
-Current priority: {ticket.priority or "unknown"}
-Current status: {ticket.status or "unknown"}
 
 Classify the ticket category as one of: general, billing, technical.
 Classify the priority as one of: low, medium, high, urgent.
