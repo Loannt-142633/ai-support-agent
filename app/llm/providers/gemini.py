@@ -87,7 +87,6 @@ class GeminiLLMClient(LLMClient):
             AttributeError,
             TypeError,
             ValueError,
-            json.JSONDecodeError,
             ValidationError,
         ) as error:
             raise LLMInvalidResponseError(
