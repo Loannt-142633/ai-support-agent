@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     debug: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]
     database_url: str = "postgresql+psycopg://app:app@localhost:5432/ai_support_agent"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.5-flash"
+    gemini_timeout: float = 30.0
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 
