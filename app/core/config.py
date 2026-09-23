@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash"
     gemini_timeout: float = 30.0
+    embedding_model: str = "intfloat/multilingual-e5-base"
+    embedding_dimension: int = 768
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 
