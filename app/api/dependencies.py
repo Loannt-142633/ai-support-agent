@@ -55,7 +55,11 @@ def get_retrieval_service(
 ) -> RetrievalService:
     """Build semantic retrieval for the current database session."""
 
-    return RetrievalService(embedding, DocumentChunkRepository(session))
+    return RetrievalService(
+        embedding,
+        DocumentChunkRepository(session),
+        max_distance=get_settings().max_distance,
+    )
 
 
 def get_chunking_service() -> ChunkingService:

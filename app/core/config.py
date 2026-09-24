@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     document_storage_dir: str = "uploads/documents"
     max_document_size_bytes: int = 50 * 1024 * 1024
     max_chunk_size: int = 500
+    max_distance: float = 0.24
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 

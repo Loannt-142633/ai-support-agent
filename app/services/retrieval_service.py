@@ -14,9 +14,13 @@ class RetrievalService:
         self,
         embedding: EmbeddingService,
         chunk_repository: DocumentChunkRepository,
+        max_distance: float,
     ) -> None:
+        if not 0 <= max_distance <= 2:
+            raise ValueError("max_distance must be between 0 and 2")
         self._embedding = embedding
         self._chunks = chunk_repository
+        self._max_distance = max_distance
 
     async def retrieve(
         self,
@@ -41,4 +45,5 @@ class RetrievalService:
             query_vector=query_vector,
             top_k=top_k,
             document_type=normalized_type,
+            max_distance=self._max_distance,
         )

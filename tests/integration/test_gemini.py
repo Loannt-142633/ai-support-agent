@@ -1,7 +1,7 @@
 import asyncio
-import os
 
 import pytest
+from app.core.config import get_settings
 from app.llm.providers.gemini import GeminiLLMClient
 from app.schemas.ticket_ai_analysis import TicketAIAnalysisOutput
 
@@ -10,14 +10,14 @@ from app.schemas.ticket_ai_analysis import TicketAIAnalysisOutput
 def test_gemini_analyzes_duplicate_card_charge() -> None:
     """Verify the real Gemini provider returns the requested ticket structure."""
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    settings = get_settings()
+    if not settings.gemini_api_key.strip():
         pytest.skip("GEMINI_API_KEY is not configured")
 
     client = GeminiLLMClient(
-        api_key=api_key,
-        model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
-        timeout=float(os.getenv("GEMINI_TIMEOUT", "30")),
+        api_key=settings.gemini_api_key,
+        model=settings.gemini_model,
+        timeout=settings.gemini_timeout,
     )
 
     result = asyncio.run(

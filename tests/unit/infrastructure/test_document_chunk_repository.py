@@ -82,6 +82,41 @@ def test_search_similar_does_not_join_documents_without_filter() -> None:
     assert "JOIN documents" not in str(session.execute.await_args.args[0])
 
 
+def test_search_similar_filters_distance_in_sql_before_limit() -> None:
+    session = AsyncMock()
+    query_result = MagicMock()
+    query_result.all.return_value = []
+    session.execute.return_value = query_result
+
+    result = asyncio.run(
+        DocumentChunkRepository(session).search_similar(
+            query_vector=[1.0, 0.0], top_k=3, max_distance=0.24
+        )
+    )
+
+    assert result == []
+    statement = session.execute.await_args.args[0]
+    sql = str(statement)
+    assert "WHERE" in sql
+    assert "<=>" in sql
+    assert sql.index("WHERE") < sql.index("ORDER BY") < sql.index("LIMIT")
+    assert 0.24 in statement.compile().params.values()
+
+
+@pytest.mark.parametrize("max_distance", [-0.1, 2.1])
+def test_search_similar_rejects_invalid_max_distance(max_distance: float) -> None:
+    session = AsyncMock()
+
+    with pytest.raises(ValueError, match="max_distance"):
+        asyncio.run(
+            DocumentChunkRepository(session).search_similar(
+                query_vector=[1.0], top_k=3, max_distance=max_distance
+            )
+        )
+
+    session.execute.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     ("query_vector", "top_k", "document_type"),
     [([], 1, None), ([1.0], 0, None), ([1.0], 1, "  ")],

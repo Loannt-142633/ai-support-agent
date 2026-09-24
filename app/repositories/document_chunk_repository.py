@@ -65,13 +65,16 @@ class DocumentChunkRepository:
         query_vector: list[float],
         top_k: int,
         document_type: str | None = None,
+        max_distance: float | None = None,
     ) -> list[SimilarDocumentChunk]:
-        """Return nearest chunks ordered by ascending cosine distance."""
+        """Filter by cosine distance, then return the nearest matching chunks."""
 
         if not query_vector:
             raise ValueError("query_vector must not be empty")
         if top_k <= 0:
             raise ValueError("top_k must be greater than zero")
+        if max_distance is not None and not 0 <= max_distance <= 2:
+            raise ValueError("max_distance must be between 0 and 2")
 
         distance = DocumentChunk.embedding.cosine_distance(query_vector)
         statement = select(
@@ -87,6 +90,8 @@ class DocumentChunkRepository:
             statement = statement.join(
                 Document, Document.id == DocumentChunk.document_id
             ).where(Document.document_type == normalized_type)
+        if max_distance is not None:
+            statement = statement.where(distance <= max_distance)
         statement = statement.order_by(distance.asc()).limit(top_k)
 
         result = await self._session.execute(statement)

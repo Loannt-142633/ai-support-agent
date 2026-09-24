@@ -99,6 +99,7 @@ async def _ingest_and_verify_policy() -> None:
                 query_vector=list(persisted[0].embedding),
                 top_k=1,
                 document_type=TEST_DOCUMENT_TYPE,
+                max_distance=0.01,
             )
             assert len(matches) == 1
             assert matches[0].document_id == document_id
@@ -108,7 +109,9 @@ async def _ingest_and_verify_policy() -> None:
 
             question = "Can I get a refund for a $600 order?"
             top_three = await RetrievalService(
-                embedding_service, chunk_repository
+                embedding_service,
+                chunk_repository,
+                max_distance=settings.max_distance,
             ).retrieve(question, top_k=3)
 
             print(f"\nQuestion: {question}")
@@ -119,10 +122,11 @@ async def _ingest_and_verify_policy() -> None:
                 )
                 print(match.content)
 
-            assert len(top_three) == 3
+            assert 0 < len(top_three) <= 3
             assert [match.distance for match in top_three] == sorted(
                 match.distance for match in top_three
             )
+            assert all(match.distance <= settings.max_distance for match in top_three)
             assert any(
                 "manager approval" in match.content.lower() for match in top_three
             )
