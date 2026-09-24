@@ -10,6 +10,8 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.llm.client import LLMClient
 from app.llm.providers.gemini import GeminiLLMClient
+from app.parsers.document import DocumentParser
+from app.parsers.pdf import PDFDocumentParser
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
@@ -20,6 +22,12 @@ from app.services.user_service import UserService
 from app.storage.local import LocalDocumentStorage
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def get_document_parser() -> DocumentParser:
+    """Build the parser used for uploaded PDF documents."""
+
+    return PDFDocumentParser()
 
 
 def get_user_service(session: DbSession) -> UserService:
