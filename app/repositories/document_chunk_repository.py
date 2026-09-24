@@ -4,9 +4,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from sqlalchemy import insert
+from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 
 
@@ -18,6 +19,16 @@ class DocumentChunkCreate:
     chunk_index: int
     content: str
     embedding: list[float]
+
+
+@dataclass(frozen=True)
+class SimilarDocumentChunk:
+    """A document chunk ranked by cosine distance from a query."""
+
+    document_id: UUID
+    chunk_index: int
+    content: str
+    distance: float
 
 
 class DocumentChunkRepository:
@@ -47,3 +58,44 @@ class DocumentChunkRepository:
             insert(DocumentChunk).returning(DocumentChunk), values
         )
         return list(result.all())
+
+    async def search_similar(
+        self,
+        *,
+        query_vector: list[float],
+        top_k: int,
+        document_type: str | None = None,
+    ) -> list[SimilarDocumentChunk]:
+        """Return nearest chunks ordered by ascending cosine distance."""
+
+        if not query_vector:
+            raise ValueError("query_vector must not be empty")
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than zero")
+
+        distance = DocumentChunk.embedding.cosine_distance(query_vector)
+        statement = select(
+            DocumentChunk.document_id,
+            DocumentChunk.chunk_index,
+            DocumentChunk.content,
+            distance.label("distance"),
+        )
+        if document_type is not None:
+            normalized_type = document_type.strip()
+            if not normalized_type:
+                raise ValueError("document_type must not be empty")
+            statement = statement.join(
+                Document, Document.id == DocumentChunk.document_id
+            ).where(Document.document_type == normalized_type)
+        statement = statement.order_by(distance.asc()).limit(top_k)
+
+        result = await self._session.execute(statement)
+        return [
+            SimilarDocumentChunk(
+                document_id=document_id,
+                chunk_index=chunk_index,
+                content=content,
+                distance=float(chunk_distance),
+            )
+            for document_id, chunk_index, content, chunk_distance in result.all()
+        ]

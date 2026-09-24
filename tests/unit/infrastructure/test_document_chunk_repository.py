@@ -2,10 +2,12 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
 from app.models.document_chunk import DocumentChunk
 from app.repositories.document_chunk_repository import (
     DocumentChunkCreate,
     DocumentChunkRepository,
+    SimilarDocumentChunk,
 )
 from sqlalchemy.sql.dml import Insert
 
@@ -38,3 +40,64 @@ def test_bulk_create_skips_database_for_empty_batch() -> None:
 
     assert asyncio.run(DocumentChunkRepository(session).bulk_create([])) == []
     session.scalars.assert_not_awaited()
+
+
+def test_search_similar_filters_document_type_and_maps_ranked_results() -> None:
+    session = AsyncMock()
+    document_id = uuid4()
+    query_result = MagicMock()
+    query_result.all.return_value = [(document_id, 2, "Closest policy", 0.125)]
+    session.execute.return_value = query_result
+
+    result = asyncio.run(
+        DocumentChunkRepository(session).search_similar(
+            query_vector=[1.0, 0.0],
+            top_k=3,
+            document_type=" refund_policy ",
+        )
+    )
+
+    assert result == [SimilarDocumentChunk(document_id, 2, "Closest policy", 0.125)]
+    session.execute.assert_awaited_once()
+    sql = str(session.execute.await_args.args[0])
+    assert "JOIN documents" in sql
+    assert "documents.document_type" in sql
+    assert "ORDER BY" in sql
+    assert "LIMIT" in sql
+
+
+def test_search_similar_does_not_join_documents_without_filter() -> None:
+    session = AsyncMock()
+    query_result = MagicMock()
+    query_result.all.return_value = []
+    session.execute.return_value = query_result
+
+    result = asyncio.run(
+        DocumentChunkRepository(session).search_similar(
+            query_vector=[1.0, 0.0], top_k=5
+        )
+    )
+
+    assert result == []
+    assert "JOIN documents" not in str(session.execute.await_args.args[0])
+
+
+@pytest.mark.parametrize(
+    ("query_vector", "top_k", "document_type"),
+    [([], 1, None), ([1.0], 0, None), ([1.0], 1, "  ")],
+)
+def test_search_similar_rejects_invalid_input(
+    query_vector: list[float], top_k: int, document_type: str | None
+) -> None:
+    session = AsyncMock()
+
+    with pytest.raises(ValueError):
+        asyncio.run(
+            DocumentChunkRepository(session).search_similar(
+                query_vector=query_vector,
+                top_k=top_k,
+                document_type=document_type,
+            )
+        )
+
+    session.execute.assert_not_awaited()

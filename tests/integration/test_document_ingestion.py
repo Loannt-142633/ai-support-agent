@@ -56,6 +56,7 @@ async def _ingest_and_verify_policy() -> None:
         document_id = document.id
 
         try:
+            chunk_repository = DocumentChunkRepository(session)
             service = DocumentIngestionService(
                 LocalDocumentStorage(POLICY_PDF.parent),
                 PDFDocumentParser(),
@@ -64,7 +65,7 @@ async def _ingest_and_verify_policy() -> None:
                     E5EmbeddingModel(settings.embedding_model),
                     settings.embedding_dimension,
                 ),
-                DocumentChunkRepository(session),
+                chunk_repository,
                 session,
             )
 
@@ -84,6 +85,17 @@ async def _ingest_and_verify_policy() -> None:
                 len(chunk.embedding) == settings.embedding_dimension for chunk in persisted
             )
             assert "Refund and Reimbursement Policy" in persisted[0].content
+
+            matches = await chunk_repository.search_similar(
+                query_vector=list(persisted[0].embedding),
+                top_k=1,
+                document_type=TEST_DOCUMENT_TYPE,
+            )
+            assert len(matches) == 1
+            assert matches[0].document_id == document_id
+            assert matches[0].chunk_index == persisted[0].chunk_index
+            assert matches[0].content == persisted[0].content
+            assert abs(matches[0].distance) < 1e-5
         finally:
             await session.rollback()
             stored_document = await session.get(Document, document_id)
