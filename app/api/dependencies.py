@@ -34,9 +34,7 @@ def get_chunk_embedding_client() -> EmbeddingClient:
     """Reuse the lazily loaded model for sentence similarity."""
 
     settings = get_settings()
-    return SentenceTransformerEmbeddingClient(
-        settings.embedding_model, prefix=settings.chunk_embedding_prefix
-    )
+    return SentenceTransformerEmbeddingClient(settings.embedding_model)
 
 
 def get_chunking_service(

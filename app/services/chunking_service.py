@@ -3,7 +3,7 @@
 import math
 import re
 
-from app.embeddings.client import EmbeddingClient, EmbeddingError
+from app.embeddings.client import EmbeddingClient, EmbeddingError, EmbeddingInputType
 
 
 class ChunkingService:
@@ -37,7 +37,10 @@ class ChunkingService:
             return [units[0][0]]
 
         vectors = self._normalize_vectors(
-            await self._embeddings.embed([text for text, _ in units]), len(units)
+            await self._embeddings.embed(
+                [text for text, _ in units], input_type=EmbeddingInputType.QUERY
+            ),
+            len(units),
         )
         chunks: list[str] = []
         current = units[0][0]

@@ -2,12 +2,15 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
-from app.embeddings.client import EmbeddingError
+from app.embeddings.client import EmbeddingError, EmbeddingInputType
 from app.services.chunking_service import ChunkingService
 
 
 class SimilarEmbeddings:
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(
+        self, texts: list[str], *, input_type: EmbeddingInputType
+    ) -> list[list[float]]:
+        assert input_type is EmbeddingInputType.QUERY
         return [[1.0, 0.0] for _ in texts]
 
 
@@ -25,7 +28,8 @@ def test_similar_sentences_stay_together_but_topic_change_starts_new_chunk() -> 
 
     assert result == ["Refunds are available. Return your receipt.", "Delivery is free."]
     embeddings.embed.assert_awaited_once_with(
-        ["Refunds are available.", "Return your receipt.", "Delivery is free."]
+        ["Refunds are available.", "Return your receipt.", "Delivery is free."],
+        input_type=EmbeddingInputType.QUERY,
     )
 
 
@@ -111,4 +115,6 @@ def test_closing_quote_and_decimal_are_kept_in_sentences() -> None:
     embeddings = AsyncMock()
     embeddings.embed.return_value = [[1.0], [1.0]]
     asyncio.run(ChunkingService(500, embeddings).chunk('Price is 3.14. "Thank you!"'))
-    embeddings.embed.assert_awaited_once_with(["Price is 3.14.", '"Thank you!"'])
+    embeddings.embed.assert_awaited_once_with(
+        ["Price is 3.14.", '"Thank you!"'], input_type=EmbeddingInputType.QUERY
+    )

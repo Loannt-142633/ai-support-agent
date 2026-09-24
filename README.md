@@ -82,18 +82,20 @@ Install the local embedding dependency before using semantic chunking:
 
 The model in `EMBEDDING_MODEL` is loaded lazily and reused. First use downloads
 the model if it is not cached. Loading and inference run in a worker thread.
-`CHUNK_EMBEDDING_PREFIX="query: "` follows the multilingual E5 model's
-[semantic similarity guidance](https://huggingface.co/intfloat/multilingual-e5-base).
-Adjust the prefix when changing models and calibrate the similarity threshold
-with representative documents. Sentence detection currently uses punctuation
-and blank lines; abbreviations can create extra sentence boundaries.
+The E5 adapter maps `EmbeddingInputType.QUERY` to `query: ` for sentence
+similarity and `EmbeddingInputType.DOCUMENT` to `passage: ` for stored chunk
+vectors, following the model's
+[input guidance](https://huggingface.co/intfloat/multilingual-e5-base).
+Calibrate the similarity threshold with representative documents. Sentence
+detection currently uses punctuation and blank lines; abbreviations can create
+extra sentence boundaries.
 
 ```python
 from app.embeddings.sentence_transformer import SentenceTransformerEmbeddingClient
 from app.services.chunking_service import ChunkingService
 
 client = SentenceTransformerEmbeddingClient(
-    "intfloat/multilingual-e5-base", prefix="query: "
+    "intfloat/multilingual-e5-base"
 )
 chunker = ChunkingService(500, client, similarity_threshold=0.85)
 chunks = await chunker.chunk(text)
