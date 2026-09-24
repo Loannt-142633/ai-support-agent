@@ -1,4 +1,4 @@
-"""Local sentence-transformers adapter, loaded only when first used."""
+"""Local E5 embedding adapter, loaded only when first used."""
 
 import asyncio
 import importlib
@@ -24,7 +24,7 @@ class _Encoder(Protocol):
     ) -> _EncodedVectors: ...
 
 
-class SentenceTransformerEmbeddingClient:
+class E5EmbeddingModel:
     """Apply E5 query/passage prefixes and run local inference off the event loop."""
 
     _prefixes = {
@@ -64,7 +64,7 @@ class SentenceTransformerEmbeddingClient:
                     module = importlib.import_module("sentence_transformers")
                 except ImportError as error:
                     raise EmbeddingError(
-                        'Install semantic chunking dependencies with: pip install -e ".[semantic]"'
+                        'Install embedding dependencies with: pip install -e ".[embeddings]"'
                     ) from error
                 self._model = cast(_Encoder, module.SentenceTransformer(self._model_name))
             vectors = self._model.encode(

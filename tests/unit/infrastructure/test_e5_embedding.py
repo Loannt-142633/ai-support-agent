@@ -3,16 +3,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from app.embeddings.client import EmbeddingError, EmbeddingInputType
-from app.embeddings.sentence_transformer import SentenceTransformerEmbeddingClient
+from app.embeddings.e5 import E5EmbeddingModel
 
 
 def test_adapter_reuses_model_and_maps_query_and_document_prefixes() -> None:
     module = MagicMock()
     model = module.SentenceTransformer.return_value
     model.encode.return_value.tolist.return_value = [[1.0, 0.0]]
-    client = SentenceTransformerEmbeddingClient("test-model")
+    client = E5EmbeddingModel("test-model")
 
-    with patch("app.embeddings.sentence_transformer.importlib.import_module", return_value=module):
+    with patch("app.embeddings.e5.importlib.import_module", return_value=module):
         assert asyncio.run(client.embed(["Refunds."], input_type=EmbeddingInputType.QUERY)) == [
             [1.0, 0.0]
         ]
@@ -27,12 +27,12 @@ def test_adapter_reuses_model_and_maps_query_and_document_prefixes() -> None:
 def test_adapter_reports_missing_optional_dependency() -> None:
     with (
         patch(
-            "app.embeddings.sentence_transformer.importlib.import_module", side_effect=ImportError
+            "app.embeddings.e5.importlib.import_module", side_effect=ImportError
         ),
-        pytest.raises(EmbeddingError, match="semantic"),
+        pytest.raises(EmbeddingError, match="embeddings"),
     ):
         asyncio.run(
-            SentenceTransformerEmbeddingClient("test-model").embed(
+            E5EmbeddingModel("test-model").embed(
                 ["Hello."], input_type=EmbeddingInputType.QUERY
             )
         )

@@ -5,7 +5,7 @@ from typing import Protocol
 
 
 class EmbeddingInputType(Enum):
-    """How input text will be used by the embedding model."""
+    """Use DOCUMENT for ingestion and QUERY for retrieval queries."""
 
     QUERY = "query"
     DOCUMENT = "document"

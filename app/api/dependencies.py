@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.embeddings.client import EmbeddingClient
-from app.embeddings.sentence_transformer import SentenceTransformerEmbeddingClient
+from app.embeddings.e5 import E5EmbeddingModel
 from app.llm.client import LLMClient
 from app.llm.providers.gemini import GeminiLLMClient
 from app.parsers.document import DocumentParser
@@ -30,24 +30,18 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 @lru_cache
-def get_chunk_embedding_client() -> EmbeddingClient:
-    """Reuse the lazily loaded model for sentence similarity."""
+def get_embedding_client() -> EmbeddingClient:
+    """Reuse the lazily loaded embedding model for ingestion and retrieval."""
 
     settings = get_settings()
-    return SentenceTransformerEmbeddingClient(settings.embedding_model)
+    return E5EmbeddingModel(settings.embedding_model)
 
 
-def get_chunking_service(
-    embedding_client: Annotated[EmbeddingClient, Depends(get_chunk_embedding_client)],
-) -> ChunkingService:
-    """Build the semantic chunker with a strict character-size fallback."""
+def get_chunking_service() -> ChunkingService:
+    """Build the paragraph/sentence chunker with a strict character limit."""
 
     settings = get_settings()
-    return ChunkingService(
-        settings.max_chunk_size,
-        embedding_client,
-        similarity_threshold=settings.chunk_similarity_threshold,
-    )
+    return ChunkingService(settings.max_chunk_size)
 
 
 def get_document_parser() -> DocumentParser:

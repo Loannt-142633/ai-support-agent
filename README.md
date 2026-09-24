@@ -67,44 +67,40 @@ then the remaining user and ticket requests.
 
 ## Document chunking
 
-Semantic document chunking compares adjacent sentence embeddings and starts a new
-chunk when cosine similarity falls below `CHUNK_SIMILARITY_THRESHOLD` (default
-`0.85`). `MAX_CHUNK_SIZE` remains a strict character limit, including separators:
-whole sentences are kept when possible; an oversized sentence is split at
-whitespace, with character splitting for oversized words. Paragraph boundaries
-are preserved when paragraphs share a chunk. Empty input returns `[]`.
+Chunking normalizes line endings and horizontal whitespace, splits paragraphs
+and sentences, and groups adjacent units within `MAX_CHUNK_SIZE` (default 500
+characters). Separators count toward the limit. Oversized sentences are split
+at whitespace; oversized words are split by character. Order and non-whitespace
+content are preserved, and empty input returns `[]`.
 
-Install the local embedding dependency before using semantic chunking:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[semantic]"
-```
-
-The model in `EMBEDDING_MODEL` is loaded lazily and reused. First use downloads
-the model if it is not cached. Loading and inference run in a worker thread.
-The E5 adapter maps `EmbeddingInputType.QUERY` to `query: ` for sentence
-similarity and `EmbeddingInputType.DOCUMENT` to `passage: ` for stored chunk
-vectors, following the model's
-[input guidance](https://huggingface.co/intfloat/multilingual-e5-base).
-Calibrate the similarity threshold with representative documents. Sentence
-detection currently uses punctuation and blank lines; abbreviations can create
-extra sentence boundaries.
+`ChunkingService` is synchronous and requires no embedding model:
 
 ```python
-from app.embeddings.sentence_transformer import SentenceTransformerEmbeddingClient
 from app.services.chunking_service import ChunkingService
 
-client = SentenceTransformerEmbeddingClient(
-    "intfloat/multilingual-e5-base"
-)
-chunker = ChunkingService(500, client, similarity_threshold=0.85)
-chunks = await chunker.chunk(text)
+chunks = ChunkingService(max_chunk_size=500).chunk(text)
 ```
 
-`chunk()` is now async. Embedding errors propagate as `EmbeddingError`; the size
-fallback does not hide provider failures. Unit tests use fake vectors without
-downloading a model. The character limit is not an embedding-model token limit;
-sentence-transformers applies its model's token truncation to long inputs.
+Sentence detection uses punctuation and blank lines; abbreviations can create
+extra boundaries. The size limit counts Python characters, not model tokens.
+
+## Embedding support
+
+`EmbeddingClient`, `EmbeddingInputType`, and `E5EmbeddingModel` remain available
+for future ingestion and retrieval. Ingestion uses `DOCUMENT` (E5 `passage: `);
+retrieval uses `QUERY` (E5 `query: `). Prefix mapping belongs to the E5 adapter.
+Ingestion currently extracts text only; vector persistence and retrieval are
+not implemented yet.
+
+Install the optional dependency when using the embedding adapter:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[embeddings]"
+```
+
+The model configured in `EMBEDDING_MODEL` is loaded lazily and reused through
+`get_embedding_client()`. First use downloads the model if it is not cached;
+loading and inference run in a worker thread. Chunking does not load this model.
 
 ## Checks
 
