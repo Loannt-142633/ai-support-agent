@@ -21,11 +21,10 @@ async def upload_document(
     """Upload a PDF document and persist its metadata."""
 
     try:
-        content = await file.read(service.max_file_size + 1)
         document = await service.upload(
             filename=file.filename or "",
             content_type=file.content_type,
-            content=content,
+            stream=file,
             document_type=document_type,
         )
         return DocumentResponse.model_validate(document)

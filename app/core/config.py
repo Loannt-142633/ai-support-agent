@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     embedding_model: str = "intfloat/multilingual-e5-base"
     embedding_dimension: int = 768
     document_storage_dir: str = "uploads/documents"
-    max_document_size_bytes: int = 10 * 1024 * 1024
+    max_document_size_bytes: int = 50 * 1024 * 1024
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 
