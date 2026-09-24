@@ -23,6 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+semantic = ["sentence-transformers>=5.0,<6.0"]
 dev = [
 
     "aiosqlite>=0.20,<1.0",

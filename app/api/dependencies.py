@@ -1,5 +1,6 @@
 """FastAPI dependency providers for application services."""
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
@@ -8,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.embeddings.client import EmbeddingClient
+from app.embeddings.sentence_transformer import SentenceTransformerEmbeddingClient
 from app.llm.client import LLMClient
 from app.llm.providers.gemini import GeminiLLMClient
 from app.parsers.document import DocumentParser
@@ -15,6 +18,7 @@ from app.parsers.pdf import PDFDocumentParser
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
+from app.services.chunking_service import ChunkingService
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.document_service import DocumentService
 from app.services.ticket_analysis_service import TicketAnalysisService
@@ -23,6 +27,29 @@ from app.services.user_service import UserService
 from app.storage.local import LocalDocumentStorage
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+@lru_cache
+def get_chunk_embedding_client() -> EmbeddingClient:
+    """Reuse the lazily loaded model for sentence similarity."""
+
+    settings = get_settings()
+    return SentenceTransformerEmbeddingClient(
+        settings.embedding_model, prefix=settings.chunk_embedding_prefix
+    )
+
+
+def get_chunking_service(
+    embedding_client: Annotated[EmbeddingClient, Depends(get_chunk_embedding_client)],
+) -> ChunkingService:
+    """Build the semantic chunker with a strict character-size fallback."""
+
+    settings = get_settings()
+    return ChunkingService(
+        settings.max_chunk_size,
+        embedding_client,
+        similarity_threshold=settings.chunk_similarity_threshold,
+    )
 
 
 def get_document_parser() -> DocumentParser:
