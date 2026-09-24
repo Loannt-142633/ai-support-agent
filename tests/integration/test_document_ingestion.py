@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from app.core.config import get_settings
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.embeddings.e5 import E5EmbeddingModel
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
@@ -30,11 +30,18 @@ TEST_DOCUMENT_TYPE = "refund_policy_integration_test"
 def test_ingests_policy_pdf_into_postgres_with_real_e5_embeddings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Exercise the complete PDF-to-pgvector ingestion workflow."""
+    """Ingest the policy PDF, then embed a question and inspect the Top-3."""
 
     assert POLICY_PDF.is_file(), f"Missing integration fixture: {POLICY_PDF}"
     monkeypatch.setenv("HF_HOME", str(HF_TEST_CACHE))
-    asyncio.run(_ingest_and_verify_policy())
+    asyncio.run(_run_with_engine_cleanup())
+
+
+async def _run_with_engine_cleanup() -> None:
+    try:
+        await _ingest_and_verify_policy()
+    finally:
+        await engine.dispose()
 
 
 async def _ingest_and_verify_policy() -> None:
@@ -57,14 +64,15 @@ async def _ingest_and_verify_policy() -> None:
 
         try:
             chunk_repository = DocumentChunkRepository(session)
+            embedding_service = EmbeddingService(
+                E5EmbeddingModel(settings.embedding_model),
+                settings.embedding_dimension,
+            )
             service = DocumentIngestionService(
                 LocalDocumentStorage(POLICY_PDF.parent),
                 PDFDocumentParser(),
                 ChunkingService(settings.max_chunk_size),
-                EmbeddingService(
-                    E5EmbeddingModel(settings.embedding_model),
-                    settings.embedding_dimension,
-                ),
+                embedding_service,
                 chunk_repository,
                 session,
             )
@@ -96,6 +104,29 @@ async def _ingest_and_verify_policy() -> None:
             assert matches[0].chunk_index == persisted[0].chunk_index
             assert matches[0].content == persisted[0].content
             assert abs(matches[0].distance) < 1e-5
+
+            question = "Can I get a refund for a $600 order?"
+            query_vector = await embedding_service.embed_query(question)
+            top_three = await chunk_repository.search_similar(
+                query_vector=query_vector,
+                top_k=3,
+            )
+
+            print(f"\nQuestion: {question}")
+            for rank, match in enumerate(top_three, start=1):
+                print(
+                    f"\n#{rank} distance={match.distance:.6f} "
+                    f"document_id={match.document_id} chunk_index={match.chunk_index}"
+                )
+                print(match.content)
+
+            assert len(top_three) == 3
+            assert [match.distance for match in top_three] == sorted(
+                match.distance for match in top_three
+            )
+            assert any(
+                "manager approval" in match.content.lower() for match in top_three
+            )
         finally:
             await session.rollback()
             stored_document = await session.get(Document, document_id)
