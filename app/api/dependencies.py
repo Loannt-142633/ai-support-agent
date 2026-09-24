@@ -15,6 +15,7 @@ from app.parsers.pdf import PDFDocumentParser
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
+from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.document_service import DocumentService
 from app.services.ticket_analysis_service import TicketAnalysisService
 from app.services.ticket_service import TicketService
@@ -28,6 +29,16 @@ def get_document_parser() -> DocumentParser:
     """Build the parser used for uploaded PDF documents."""
 
     return PDFDocumentParser()
+
+
+def get_document_ingestion_service(
+    parser: Annotated[DocumentParser, Depends(get_document_parser)],
+) -> DocumentIngestionService:
+    """Build the document text extraction workflow."""
+
+    settings = get_settings()
+    storage = LocalDocumentStorage(Path(settings.document_storage_dir))
+    return DocumentIngestionService(storage, parser)
 
 
 def get_user_service(session: DbSession) -> UserService:
