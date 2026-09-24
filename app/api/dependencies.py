@@ -23,6 +23,7 @@ from app.services.chunking_service import ChunkingService
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
+from app.services.retrieval_service import RetrievalService
 from app.services.ticket_analysis_service import TicketAnalysisService
 from app.services.ticket_service import TicketService
 from app.services.user_service import UserService
@@ -45,6 +46,15 @@ def get_embedding_service(
     """Build the document/query embedding service using the shared model."""
 
     return EmbeddingService(embedding_client, get_settings().embedding_dimension)
+
+
+def get_retrieval_service(
+    session: DbSession,
+    embedding: Annotated[EmbeddingService, Depends(get_embedding_service)],
+) -> RetrievalService:
+    """Build semantic retrieval for the current database session."""
+
+    return RetrievalService(embedding, DocumentChunkRepository(session))
 
 
 def get_chunking_service() -> ChunkingService:

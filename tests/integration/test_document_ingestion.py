@@ -13,6 +13,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.services.chunking_service import ChunkingService
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.embedding_service import EmbeddingService
+from app.services.retrieval_service import RetrievalService
 from app.storage.local import LocalDocumentStorage
 from sqlalchemy import delete, select
 
@@ -106,11 +107,9 @@ async def _ingest_and_verify_policy() -> None:
             assert abs(matches[0].distance) < 1e-5
 
             question = "Can I get a refund for a $600 order?"
-            query_vector = await embedding_service.embed_query(question)
-            top_three = await chunk_repository.search_similar(
-                query_vector=query_vector,
-                top_k=3,
-            )
+            top_three = await RetrievalService(
+                embedding_service, chunk_repository
+            ).retrieve(question, top_k=3)
 
             print(f"\nQuestion: {question}")
             for rank, match in enumerate(top_three, start=1):
