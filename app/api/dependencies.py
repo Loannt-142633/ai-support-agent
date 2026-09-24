@@ -23,6 +23,7 @@ from app.services.chunking_service import ChunkingService
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
+from app.services.rag_service import RAGService
 from app.services.retrieval_service import RetrievalService
 from app.services.ticket_analysis_service import TicketAnalysisService
 from app.services.ticket_service import TicketService
@@ -129,6 +130,15 @@ def get_llm_client() -> LLMClient:
 
 
 LLMClientDependency = Annotated[LLMClient, Depends(get_llm_client)]
+
+
+def get_rag_service(
+    retrieval: Annotated[RetrievalService, Depends(get_retrieval_service)],
+    llm_client: LLMClientDependency,
+) -> RAGService:
+    """Build grounded question answering for the current request."""
+
+    return RAGService(retrieval, llm_client)
 
 
 def get_ticket_analysis_service(llm_client: LLMClientDependency) -> TicketAnalysisService:
