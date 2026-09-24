@@ -21,6 +21,7 @@ from app.repositories.user_repository import UserRepository
 from app.services.chunking_service import ChunkingService
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.document_service import DocumentService
+from app.services.embedding_service import EmbeddingService
 from app.services.ticket_analysis_service import TicketAnalysisService
 from app.services.ticket_service import TicketService
 from app.services.user_service import UserService
@@ -35,6 +36,14 @@ def get_embedding_client() -> EmbeddingClient:
 
     settings = get_settings()
     return E5EmbeddingModel(settings.embedding_model)
+
+
+def get_embedding_service(
+    embedding_client: Annotated[EmbeddingClient, Depends(get_embedding_client)],
+) -> EmbeddingService:
+    """Build the document/query embedding service using the shared model."""
+
+    return EmbeddingService(embedding_client)
 
 
 def get_chunking_service() -> ChunkingService:
