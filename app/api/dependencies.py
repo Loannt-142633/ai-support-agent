@@ -44,7 +44,7 @@ def get_embedding_service(
 ) -> EmbeddingService:
     """Build the document/query embedding service using the shared model."""
 
-    return EmbeddingService(embedding_client)
+    return EmbeddingService(embedding_client, get_settings().embedding_dimension)
 
 
 def get_chunking_service() -> ChunkingService:

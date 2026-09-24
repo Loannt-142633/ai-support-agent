@@ -8,8 +8,11 @@ from app.embeddings.client import EmbeddingClient, EmbeddingError, EmbeddingInpu
 class EmbeddingService:
     """Embed chunks and retrieval queries through an injected model."""
 
-    def __init__(self, embedding_client: EmbeddingClient) -> None:
+    def __init__(self, embedding_client: EmbeddingClient, expected_dimension: int) -> None:
+        if expected_dimension <= 0:
+            raise ValueError("expected_dimension must be greater than zero")
         self._client = embedding_client
+        self._expected_dimension = expected_dimension
 
     async def embed_documents(self, chunks: list[str]) -> list[list[float]]:
         """Return one vector per chunk in input order; empty input returns []."""
@@ -31,16 +34,17 @@ class EmbeddingService:
         self._validate_vectors(vectors, expected_count=1)
         return vectors[0]
 
-    @staticmethod
-    def _validate_vectors(vectors: list[list[float]], *, expected_count: int) -> None:
+    def _validate_vectors(self, vectors: list[list[float]], *, expected_count: int) -> None:
         if len(vectors) != expected_count:
             raise EmbeddingError("Expected one embedding per input text")
-        dimension = len(vectors[0])
         for vector in vectors:
             if (
                 not vector
-                or len(vector) != dimension
+                or len(vector) != self._expected_dimension
                 or not all(math.isfinite(value) for value in vector)
                 or not any(value != 0 for value in vector)
             ):
-                raise EmbeddingError("Expected finite, nonzero embeddings of equal dimension")
+                raise EmbeddingError(
+                    "Expected finite, nonzero embeddings with dimension "
+                    f"{self._expected_dimension}"
+                )
