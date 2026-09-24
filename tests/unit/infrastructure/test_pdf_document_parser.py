@@ -1,5 +1,5 @@
 import asyncio
-from pathlib import Path
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,10 +17,11 @@ def test_parse_extracts_text_from_all_pdf_pages() -> None:
 
     with patch("app.parsers.pdf.PdfReader") as reader:
         reader.return_value.pages = [first_page, empty_page, last_page]
-        result = asyncio.run(PDFDocumentParser().parse("policy.pdf"))
+        source = BytesIO(b"PDF content")
+        result = asyncio.run(PDFDocumentParser().parse(source))
 
     assert result == "First page\n\nLast page"
-    reader.assert_called_once_with(Path("policy.pdf"))
+    reader.assert_called_once_with(source)
 
 
 def test_parse_maps_file_errors_to_document_parse_error() -> None:
@@ -28,4 +29,4 @@ def test_parse_maps_file_errors_to_document_parse_error() -> None:
         patch("app.parsers.pdf.PdfReader", side_effect=FileNotFoundError),
         pytest.raises(DocumentParseError, match="Could not parse PDF"),
     ):
-        asyncio.run(PDFDocumentParser().parse("missing.pdf"))
+        asyncio.run(PDFDocumentParser().parse(BytesIO(b"invalid PDF")))
