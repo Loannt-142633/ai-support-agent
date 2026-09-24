@@ -1,19 +1,25 @@
 """Document upload application service."""
 
 from collections.abc import AsyncIterator
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document
+from app.parsers.document import ReadableDocument
 from app.repositories.document_repository import DocumentRepository
 
 
 class DocumentStorage(Protocol):
-    """Storage operations required by the document upload workflow."""
+    """Store documents and provide seekable sources for parsing."""
 
     async def save(self, *, filename: str, chunks: AsyncIterator[bytes]) -> str: ...
+
+    def open(self, storage_path: str) -> AbstractContextManager[ReadableDocument]:
+        """Open a stored document for reading; close it on context exit."""
+        ...
 
     async def delete(self, storage_path: str) -> None: ...
 

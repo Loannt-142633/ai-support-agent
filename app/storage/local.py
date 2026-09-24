@@ -2,9 +2,12 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import BinaryIO
 from uuid import uuid4
+
+from app.parsers.document import ReadableDocument
 
 
 class LocalDocumentStorage:
@@ -39,3 +42,8 @@ class LocalDocumentStorage:
         """Remove a previously stored document if it exists."""
 
         await asyncio.to_thread(Path(storage_path).unlink, missing_ok=True)
+
+    def open(self, storage_path: str) -> AbstractContextManager[ReadableDocument]:
+        """Open a stored document as a seekable binary source."""
+
+        return Path(storage_path).open("rb")
