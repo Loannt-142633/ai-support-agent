@@ -15,6 +15,7 @@ from app.llm.client import LLMClient
 from app.llm.providers.gemini import GeminiLLMClient
 from app.parsers.document import DocumentParser
 from app.parsers.pdf import PDFDocumentParser
+from app.repositories.document_chunk_repository import DocumentChunkRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
@@ -60,13 +61,23 @@ def get_document_parser() -> DocumentParser:
 
 
 def get_document_ingestion_service(
+    session: DbSession,
     parser: Annotated[DocumentParser, Depends(get_document_parser)],
+    chunking: Annotated[ChunkingService, Depends(get_chunking_service)],
+    embedding: Annotated[EmbeddingService, Depends(get_embedding_service)],
 ) -> DocumentIngestionService:
-    """Build the document text extraction workflow."""
+    """Build the complete document ingestion workflow."""
 
     settings = get_settings()
     storage = LocalDocumentStorage(Path(settings.document_storage_dir))
-    return DocumentIngestionService(storage, parser)
+    return DocumentIngestionService(
+        storage,
+        parser,
+        chunking,
+        embedding,
+        DocumentChunkRepository(session),
+        session,
+    )
 
 
 def get_user_service(session: DbSession) -> UserService:

@@ -86,11 +86,12 @@ extra boundaries. The size limit counts Python characters, not model tokens.
 
 ## Embedding support
 
-`EmbeddingClient`, `EmbeddingInputType`, and `E5EmbeddingModel` remain available
-for future ingestion and retrieval. Ingestion uses `DOCUMENT` (E5 `passage: `);
+`EmbeddingClient`, `EmbeddingInputType`, and `E5EmbeddingModel` support document
+ingestion and future retrieval. Ingestion uses `DOCUMENT` (E5 `passage: `);
 retrieval uses `QUERY` (E5 `query: `). Prefix mapping belongs to the E5 adapter.
-Ingestion currently extracts text only; vector persistence and retrieval are
-not implemented yet.
+`DocumentIngestionService` parses a stored document, chunks its text, embeds all
+chunks as one batch, and persists the indexed chunk/vector pairs with one bulk
+insert and one transaction commit. Retrieval is not implemented yet.
 
 Install the optional dependency when using the embedding adapter:
 
