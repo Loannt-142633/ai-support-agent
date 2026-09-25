@@ -20,6 +20,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
 from app.services.chunking_service import ChunkingService
+from app.services.document_ingestion_publisher import DocumentIngestionPublisher
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
@@ -107,7 +108,18 @@ def get_ticket_service(session: DbSession) -> TicketService:
     return TicketService(TicketRepository(session), UserRepository(session), session)
 
 
-def get_document_service(session: DbSession) -> DocumentService:
+def get_document_ingestion_publisher() -> DocumentIngestionPublisher | None:
+    """Return the publisher once a queue implementation is configured."""
+
+    return None
+
+
+def get_document_service(
+    session: DbSession,
+    publisher: Annotated[
+        DocumentIngestionPublisher | None, Depends(get_document_ingestion_publisher)
+    ],
+) -> DocumentService:
     """Build a document upload service for the current request."""
 
     settings = get_settings()
@@ -119,6 +131,7 @@ def get_document_service(session: DbSession) -> DocumentService:
         embedding_model=settings.embedding_model,
         embedding_dimension=settings.embedding_dimension,
         max_file_size=settings.max_document_size_bytes,
+        ingestion_publisher=publisher,
     )
 
 

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document
 from app.parsers.document import ReadableDocument
 from app.repositories.document_repository import DocumentRepository
+from app.services.document_ingestion_publisher import DocumentIngestionPublisher
 
 
 class DocumentStorage(Protocol):
@@ -48,6 +49,7 @@ class DocumentService:
         embedding_model: str,
         embedding_dimension: int,
         max_file_size: int,
+        ingestion_publisher: DocumentIngestionPublisher | None = None,
     ) -> None:
         self._repository = repository
         self._storage = storage
@@ -55,6 +57,7 @@ class DocumentService:
         self._embedding_model = embedding_model
         self._embedding_dimension = embedding_dimension
         self._max_file_size = max_file_size
+        self._ingestion_publisher = ingestion_publisher
 
     async def upload(
         self,
