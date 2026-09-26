@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from app.jobs.document_ingestion_handler import DocumentNotFoundError
 from app.messaging.rabbitmq import RabbitMQDocumentIngestionConsumer
 
 
@@ -35,6 +36,24 @@ def test_process_message_calls_handler_before_acknowledging() -> None:
     message.ack.assert_awaited_once_with()
     message.nack.assert_not_awaited()
     message.reject.assert_not_awaited()
+
+
+def test_process_message_rejects_missing_document_without_requeue(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    document_id = uuid4()
+    message = make_message(json.dumps({"document_id": str(document_id)}).encode())
+    handler = MagicMock()
+    handler.handle = AsyncMock(side_effect=DocumentNotFoundError(document_id))
+
+    with caplog.at_level(logging.ERROR):
+        asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
+
+    handler.handle.assert_awaited_once_with(document_id)
+    assert f"Document {document_id} not found for ingestion message message-1" in caplog.text
+    message.ack.assert_not_awaited()
+    message.nack.assert_not_awaited()
+    message.reject.assert_awaited_once_with(requeue=False)
 
 
 def test_process_message_logs_and_propagates_handler_error_without_settling_message(

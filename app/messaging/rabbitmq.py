@@ -7,7 +7,10 @@ from uuid import UUID
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
 
-from app.jobs.document_ingestion_handler import DocumentIngestionJobHandler
+from app.jobs.document_ingestion_handler import (
+    DocumentIngestionJobHandler,
+    DocumentNotFoundError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,14 @@ class RabbitMQDocumentIngestionConsumer:
         try:
             await self._handler.handle(document_id)
             await message.ack()
+        except DocumentNotFoundError:
+            logger.exception(
+                "Document %s not found for ingestion message %s",
+                document_id,
+                message.message_id,
+            )
+            await message.reject(requeue=False)
+            return
         except Exception:
             logger.exception(
                 "Failed to process document ingestion message %s", message.message_id
