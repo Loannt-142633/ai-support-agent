@@ -22,6 +22,20 @@ ai-support-agent/
 
 ## Setup
 
+Create `.env` from `.env.example`, then start the API, PostgreSQL, and RabbitMQ:
+
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+docker compose up --build -d
+```
+
+FastAPI is available at http://localhost:8000/docs. Compose runs Alembic
+migrations before starting the API. The API container connects to PostgreSQL
+at `db:5432` and RabbitMQ at `rabbitmq:5672`; uploaded files persist in the
+`uploads_data` Docker volume. Set `GEMINI_API_KEY` in `.env` when using Gemini.
+
+For local Python development outside Docker, install dependencies with:
+
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
@@ -29,18 +43,19 @@ ai-support-agent/
 ## PostgreSQL
 
 The application uses PostgreSQL asynchronously through SQLAlchemy and the
-`psycopg` async driver.
-Start the local database with Docker:
+`psycopg` async driver. Compose starts the database with the API. To start
+only the database for local Python development:
 
 ```powershell
 docker compose up -d db
 ```
 
-The default connection string is:
+Inside Compose, `DATABASE_URL` points to `db:5432`. When running Python on
+the host, override it with
 `postgresql+psycopg://app:app@localhost:5432/ai_support_agent`.
-Override `DATABASE_URL` in `.env` for another PostgreSQL instance.
 
-Apply migrations:
+Compose applies migrations automatically. For local Python development, apply
+them manually:
 
 ```powershell
 alembic upgrade head
@@ -49,7 +64,21 @@ alembic upgrade head
 The database layer uses `AsyncSession`; transaction commit and rollback are
 owned by application services, while routes only handle HTTP mapping.
 
+## RabbitMQ document ingestion
+
+Compose starts RabbitMQ with the API; use `docker compose up -d rabbitmq` to
+start only the broker for local Python development. The upload service
+publishes a persistent JSON message such as
+`{"document_id":"<uuid>"}` to the durable `document.ingestion` queue after the
+document metadata is committed. Inside Compose, `RABBITMQ_URL` points to
+`rabbitmq:5672`. When running Python on the host, override it with
+`amqp://app:app@localhost:5672/`. A consumer is
+not yet included; the queue holds jobs until a worker processes them.
+
 ## Run
+
+The Docker command is `docker compose up --build -d`. For local Python
+development outside Docker:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload

@@ -9,6 +9,7 @@ description = "FastAPI skeleton for an AI support agent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aio-pika>=9.4,<10.0",
     "alembic>=1.14,<2.0",
     "email-validator>=2.2,<3.0",
     "fastapi>=0.115,<1.0",
@@ -18,7 +19,7 @@ dependencies = [
     "psycopg[binary]>=3.2,<4.0",
     "python-multipart>=0.0.20,<1.0",
     "pypdf>=6.0,<7.0",
-    "sqlalchemy>=2.0,<3.0",
+    "sqlalchemy[asyncio]>=2.0,<3.0",
     "uvicorn[standard]>=0.34,<1.0",
 ]
 

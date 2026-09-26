@@ -13,6 +13,7 @@ from app.embeddings.client import EmbeddingClient
 from app.embeddings.e5 import E5EmbeddingModel
 from app.llm.client import LLMClient
 from app.llm.providers.gemini import GeminiLLMClient
+from app.messaging.rabbitmq import RabbitMQDocumentIngestionPublisher
 from app.parsers.document import DocumentParser
 from app.parsers.pdf import PDFDocumentParser
 from app.repositories.document_chunk_repository import DocumentChunkRepository
@@ -108,17 +109,19 @@ def get_ticket_service(session: DbSession) -> TicketService:
     return TicketService(TicketRepository(session), UserRepository(session), session)
 
 
-def get_document_ingestion_publisher() -> DocumentIngestionPublisher | None:
-    """Return the publisher once a queue implementation is configured."""
+def get_document_ingestion_publisher() -> DocumentIngestionPublisher:
+    """Build the RabbitMQ publisher for document ingestion jobs."""
 
-    return None
+    settings = get_settings()
+    return RabbitMQDocumentIngestionPublisher(
+        url=settings.rabbitmq_url,
+        queue_name=settings.document_ingestion_queue,
+    )
 
 
 def get_document_service(
     session: DbSession,
-    publisher: Annotated[
-        DocumentIngestionPublisher | None, Depends(get_document_ingestion_publisher)
-    ],
+    publisher: Annotated[DocumentIngestionPublisher, Depends(get_document_ingestion_publisher)],
 ) -> DocumentService:
     """Build a document upload service for the current request."""
 
