@@ -72,7 +72,6 @@ class RabbitMQDocumentIngestionConsumer:
 
         try:
             await self._handler.handle(document_id)
-            await message.ack()
         except DocumentNotFoundError:
             logger.exception(
                 "Document %s not found for ingestion message %s",
@@ -83,6 +82,22 @@ class RabbitMQDocumentIngestionConsumer:
             return
         except Exception:
             logger.exception(
-                "Failed to process document ingestion message %s", message.message_id
+                "Failed to ingest document %s from message %s",
+                document_id,
+                message.message_id,
+            )
+            await message.reject(requeue=False)
+            return
+
+        try:
+            await message.ack()
+        except Exception:
+            logger.exception(
+                "Failed to ACK document ingestion message %s", message.message_id
             )
             raise
+        logger.info(
+            "Document ingestion completed; ACK sent for document_id=%s message_id=%s",
+            document_id,
+            message.message_id,
+        )

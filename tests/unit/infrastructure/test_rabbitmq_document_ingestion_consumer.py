@@ -19,7 +19,9 @@ def make_message(body: bytes) -> MagicMock:
     return message
 
 
-def test_process_message_calls_handler_before_acknowledging() -> None:
+def test_process_message_logs_completion_after_acknowledging(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     document_id = uuid4()
     message = make_message(json.dumps({"document_id": str(document_id)}).encode())
     handler = MagicMock()
@@ -30,12 +32,34 @@ def test_process_message_calls_handler_before_acknowledging() -> None:
 
     handler.handle = AsyncMock(side_effect=handle)
 
-    asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
+    with caplog.at_level(logging.INFO):
+        asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
 
     handler.handle.assert_awaited_once_with(document_id)
     message.ack.assert_awaited_once_with()
     message.nack.assert_not_awaited()
     message.reject.assert_not_awaited()
+    assert (
+        f"Document ingestion completed; ACK sent for document_id={document_id} "
+        "message_id=message-1"
+    ) in caplog.text
+
+
+def test_process_message_does_not_log_completion_when_ack_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    document_id = uuid4()
+    message = make_message(json.dumps({"document_id": str(document_id)}).encode())
+    message.ack.side_effect = RuntimeError("ack failed")
+    handler = MagicMock()
+    handler.handle = AsyncMock()
+
+    with caplog.at_level(logging.INFO), pytest.raises(RuntimeError, match="ack failed"):
+        asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
+
+    handler.handle.assert_awaited_once_with(document_id)
+    message.ack.assert_awaited_once_with()
+    assert "Document ingestion completed" not in caplog.text
 
 
 def test_process_message_rejects_missing_document_without_requeue(
@@ -56,7 +80,7 @@ def test_process_message_rejects_missing_document_without_requeue(
     message.reject.assert_awaited_once_with(requeue=False)
 
 
-def test_process_message_logs_and_propagates_handler_error_without_settling_message(
+def test_process_message_rejects_handler_error_for_dead_lettering(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     document_id = uuid4()
@@ -64,14 +88,14 @@ def test_process_message_logs_and_propagates_handler_error_without_settling_mess
     handler = MagicMock()
     handler.handle = AsyncMock(side_effect=RuntimeError("ingestion failed"))
 
-    with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError, match="ingestion failed"):
+    with caplog.at_level(logging.ERROR):
         asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
 
     handler.handle.assert_awaited_once_with(document_id)
-    assert "Failed to process document ingestion message message-1" in caplog.text
+    assert f"Failed to ingest document {document_id} from message message-1" in caplog.text
     message.ack.assert_not_awaited()
     message.nack.assert_not_awaited()
-    message.reject.assert_not_awaited()
+    message.reject.assert_awaited_once_with(requeue=False)
 
 
 @pytest.mark.parametrize(

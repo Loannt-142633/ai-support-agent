@@ -23,7 +23,7 @@ services:
       - "5672:5672"
       - "15672:15672"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -40,6 +40,18 @@ services:
       db:
         condition: service_healthy
     command: ["alembic", "upgrade", "head"]
+  rabbitmq-setup:
+    build:
+      context: .
+      target: api
+    env_file: .env
+    environment:
+      RABBITMQ_URL: amqp://app:app@rabbitmq:5672/
+      RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    command: ["python", "-m", "app.messaging.setup_topology"]
   api:
     build:
       context: .
@@ -52,8 +64,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq-setup:
+        condition: service_completed_successfully
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
@@ -71,8 +83,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq-setup:
+        condition: service_completed_successfully
     volumes:
       - uploads_data:/app/uploads
 

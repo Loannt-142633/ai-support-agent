@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     max_chunk_size: int = 500
     max_distance: float = 0.24
     rabbitmq_url: str = "amqp://app:app@localhost:5672/"
+    rabbitmq_management_url: str = "http://localhost:15672"
     document_ingestion_queue: str = "document.ingestion"
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")

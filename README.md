@@ -67,8 +67,9 @@ owned by application services, while routes only handle HTTP mapping.
 
 ## RabbitMQ document ingestion
 
-Compose starts RabbitMQ with the API; use `docker compose up -d rabbitmq` to
-start only the broker for local Python development. The upload service
+Compose configures RabbitMQ before starting the API and worker; use
+`docker compose up --build -d rabbitmq-setup` to start the broker and provision its
+topology for local Python development. The upload service
 publishes a persistent JSON message such as
 `{"document_id":"<uuid>"}` to the durable `document.ingestion` queue after the
 document metadata is committed. Inside Compose, `RABBITMQ_URL` points to
@@ -92,10 +93,17 @@ For host-based development, run the API against the same document storage path;
 the worker opens the path saved with each uploaded document.
 
 The worker ACKs successful jobs and rejects malformed or missing-document jobs
-without requeue. It sets `prefetch_count=1`, so each consumer receives at most
-one unacknowledged job at a time. Other handler failures are currently logged
-and left unacked, which occupies that slot until the connection closes; their
-retry/rejection policy has not been implemented yet.
+without requeue. Other handler failures are also rejected without requeue for
+manual review. A `rabbitmq-setup` service declares the durable
+`document.ingestion.dlx` direct exchange, the durable
+`document.ingestion.failed` queue, and their binding. It applies a policy to
+`document.ingestion` with `dead-letter-exchange=document.ingestion.dlx` and
+`dead-letter-routing-key=document.ingestion.failed`. Rejected messages can be
+inspected in the RabbitMQ management UI at http://localhost:15672; they are not
+retried automatically. The failed message carries RabbitMQ's `x-death` header;
+the exception traceback remains in worker logs. The worker sets
+`prefetch_count=1`, so each consumer receives at most one unacknowledged job at
+a time.
 
 ## Run
 
