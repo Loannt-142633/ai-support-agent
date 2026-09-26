@@ -89,12 +89,15 @@ class DocumentService:
                 embedding_dimension=self._embedding_dimension,
             )
             await self._session.commit()
-            await self._session.refresh(document)
-            return document
         except Exception:
             await self._session.rollback()
             await self._storage.delete(storage_path)
             raise
+
+        await self._session.refresh(document)
+        if self._ingestion_publisher is not None:
+            await self._ingestion_publisher.publish(document.id)
+        return document
 
     def _validate_metadata(
         self,

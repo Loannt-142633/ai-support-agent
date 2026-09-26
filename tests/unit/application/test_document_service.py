@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from app.models.document import Document
@@ -28,7 +29,7 @@ async def consume_chunks(*, filename: str, chunks: AsyncIterator[bytes]) -> str:
 
 
 def build_service(
-    *, max_file_size: int = 100
+    *, max_file_size: int = 100, publisher: AsyncMock | None = None
 ) -> tuple[DocumentService, AsyncMock, AsyncMock, AsyncMock]:
     repository = AsyncMock()
     storage = AsyncMock()
@@ -40,6 +41,7 @@ def build_service(
         embedding_model="test-embedding",
         embedding_dimension=768,
         max_file_size=max_file_size,
+        ingestion_publisher=publisher,
     )
     return service, repository, storage, session
 
@@ -68,6 +70,67 @@ def test_upload_stores_pdf_and_persists_metadata() -> None:
     storage.save.assert_awaited_once()
     repository.create.assert_awaited_once()
     session.commit.assert_awaited_once()
+
+
+def test_upload_publishes_document_id_after_commit() -> None:
+    publisher = AsyncMock()
+    service, repository, storage, session = build_service(publisher=publisher)
+    storage.save.side_effect = consume_chunks
+    document_id = uuid4()
+    repository.create.return_value = Document(id=document_id)
+    events: list[str] = []
+
+    async def commit() -> None:
+        events.append("commit")
+
+    async def refresh(document: Document) -> None:
+        assert document.id == document_id
+        events.append("refresh")
+
+    async def publish(published_id: object) -> None:
+        assert published_id == document_id
+        events.append("publish")
+
+    session.commit.side_effect = commit
+    session.refresh.side_effect = refresh
+    publisher.publish.side_effect = publish
+
+    result = asyncio.run(
+        service.upload(
+            filename="refund_policy.pdf",
+            content_type="application/pdf",
+            stream=AsyncBytesStream(b"%PDF-1.7 test"),
+            document_type="refund_policy",
+        )
+    )
+
+    assert result.id == document_id
+    assert events == ["commit", "refresh", "publish"]
+    publisher.publish.assert_awaited_once_with(document_id)
+
+
+def test_publish_failure_preserves_committed_document_and_file() -> None:
+    publisher = AsyncMock()
+    service, repository, storage, session = build_service(publisher=publisher)
+    storage.save.side_effect = consume_chunks
+    document_id = uuid4()
+    repository.create.return_value = Document(id=document_id)
+    publisher.publish.side_effect = RuntimeError("queue unavailable")
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        asyncio.run(
+            service.upload(
+                filename="refund_policy.pdf",
+                content_type="application/pdf",
+                stream=AsyncBytesStream(b"%PDF-1.7 test"),
+                document_type="refund_policy",
+            )
+        )
+
+    session.commit.assert_awaited_once()
+    publisher.publish.assert_awaited_once_with(document_id)
+    session.rollback.assert_not_awaited()
+    storage.delete.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
