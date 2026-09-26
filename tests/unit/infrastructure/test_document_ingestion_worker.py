@@ -58,6 +58,7 @@ def test_worker_subscribes_until_stopped_then_closes_connection_and_db_engine() 
         subscribed = asyncio.Event()
 
         async def subscribe(*_args: object, **_kwargs: object) -> str:
+            channel.set_qos.assert_awaited_once_with(prefetch_count=1)
             subscribed.set()
             return "consumer-tag"
 
@@ -78,6 +79,7 @@ def test_worker_subscribes_until_stopped_then_closes_connection_and_db_engine() 
 
         connect.assert_awaited_once_with(settings.rabbitmq_url, timeout=5)
         connection.channel.assert_awaited_once_with()
+        channel.set_qos.assert_awaited_once_with(prefetch_count=1)
         channel.declare_queue.assert_awaited_once_with(
             settings.document_ingestion_queue, durable=True
         )

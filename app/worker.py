@@ -46,6 +46,7 @@ async def run_worker(stop_event: asyncio.Event) -> None:
         connection = await aio_pika.connect_robust(settings.rabbitmq_url, timeout=5)
         async with connection:
             channel = await connection.channel()
+            await channel.set_qos(prefetch_count=1)
             queue = await channel.declare_queue(settings.document_ingestion_queue, durable=True)
             await queue.consume(consumer.process_message, no_ack=False)
             logger.info("Consuming document ingestion jobs from %s", queue.name)

@@ -92,8 +92,10 @@ For host-based development, run the API against the same document storage path;
 the worker opens the path saved with each uploaded document.
 
 The worker ACKs successful jobs and rejects malformed or missing-document jobs
-without requeue. Other handler failures are currently logged and left unacked;
-their retry/rejection policy has not been implemented yet.
+without requeue. It sets `prefetch_count=1`, so each consumer receives at most
+one unacknowledged job at a time. Other handler failures are currently logged
+and left unacked, which occupies that slot until the connection closes; their
+retry/rejection policy has not been implemented yet.
 
 ## Run
 
