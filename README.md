@@ -22,7 +22,7 @@ ai-support-agent/
 
 ## Setup
 
-Create `.env` from `.env.example`, then start the API, PostgreSQL, and RabbitMQ:
+Create `.env` from `.env.example`, then start the API, worker, PostgreSQL, and RabbitMQ:
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
@@ -30,9 +30,10 @@ docker compose up --build -d
 ```
 
 FastAPI is available at http://localhost:8000/docs. Compose runs Alembic
-migrations before starting the API. The API container connects to PostgreSQL
-at `db:5432` and RabbitMQ at `rabbitmq:5672`; uploaded files persist in the
-`uploads_data` Docker volume. Set `GEMINI_API_KEY` in `.env` when using Gemini.
+migrations before starting the API and the independent ingestion worker.
+Both containers connect to PostgreSQL at `db:5432` and RabbitMQ at
+`rabbitmq:5672`, and share uploaded files through the `uploads_data` Docker
+volume. Set `GEMINI_API_KEY` in `.env` when using Gemini.
 
 For local Python development outside Docker, install dependencies with:
 
@@ -72,8 +73,27 @@ publishes a persistent JSON message such as
 `{"document_id":"<uuid>"}` to the durable `document.ingestion` queue after the
 document metadata is committed. Inside Compose, `RABBITMQ_URL` points to
 `rabbitmq:5672`. When running Python on the host, override it with
-`amqp://app:app@localhost:5672/`. A consumer is
-not yet included; the queue holds jobs until a worker processes them.
+`amqp://app:app@localhost:5672/`. The separate worker consumes the queue and
+closes its RabbitMQ connection when it receives SIGINT or SIGTERM. To start only
+the worker and its infrastructure in Docker, run
+`docker compose up --build -d worker`.
+
+For local Python development, install the embedding extra and run the worker in
+a second terminal:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[embeddings]"
+$env:DATABASE_URL = "postgresql+psycopg://app:app@localhost:5432/ai_support_agent"
+$env:RABBITMQ_URL = "amqp://app:app@localhost:5672/"
+.\.venv\Scripts\python.exe -m app.worker
+```
+
+For host-based development, run the API against the same document storage path;
+the worker opens the path saved with each uploaded document.
+
+The worker ACKs successful jobs and rejects malformed or missing-document jobs
+without requeue. Other handler failures are currently logged and left unacked;
+their retry/rejection policy has not been implemented yet.
 
 ## Run
 

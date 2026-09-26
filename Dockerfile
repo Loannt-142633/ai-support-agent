@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -10,6 +10,14 @@ COPY app ./app
 COPY migrations ./migrations
 
 RUN pip install --no-cache-dir .
+
+FROM base AS worker
+
+RUN pip install --no-cache-dir ".[embeddings]"
+
+CMD ["ai-support-worker"]
+
+FROM base AS api
 
 EXPOSE 8000
 
