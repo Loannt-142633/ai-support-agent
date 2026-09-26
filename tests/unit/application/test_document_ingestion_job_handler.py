@@ -2,7 +2,11 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from app.jobs.document_ingestion_handler import DocumentIngestionJobHandler
+import pytest
+from app.jobs.document_ingestion_handler import (
+    DocumentIngestionJobHandler,
+    DocumentNotFoundError,
+)
 from app.models.document import Document
 
 
@@ -45,7 +49,7 @@ def test_handle_uses_one_session_to_find_and_ingest_document() -> None:
     session_factory.return_value.__aexit__.assert_awaited_once()
 
 
-def test_handle_skips_ingestion_when_document_does_not_exist() -> None:
+def test_handle_raises_when_document_does_not_exist_and_closes_session() -> None:
     handler, session_factory, session = build_handler()
     document_id = uuid4()
 
@@ -54,9 +58,15 @@ def test_handle_skips_ingestion_when_document_does_not_exist() -> None:
         patch("app.jobs.document_ingestion_handler.DocumentIngestionService") as ingestion,
     ):
         documents.return_value.get_by_id = AsyncMock(return_value=None)
-        asyncio.run(handler.handle(document_id))
+        with pytest.raises(DocumentNotFoundError, match=str(document_id)) as error:
+            asyncio.run(handler.handle(document_id))
 
+    assert error.value.document_id == document_id
     documents.assert_called_once_with(session)
     documents.return_value.get_by_id.assert_awaited_once_with(document_id)
     ingestion.assert_not_called()
     session_factory.return_value.__aexit__.assert_awaited_once()
+    assert (
+        session_factory.return_value.__aexit__.await_args.args[0]
+        is DocumentNotFoundError
+    )

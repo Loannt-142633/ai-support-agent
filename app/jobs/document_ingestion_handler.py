@@ -13,6 +13,14 @@ from app.services.document_service import DocumentStorage
 from app.services.embedding_service import EmbeddingService
 
 
+class DocumentNotFoundError(LookupError):
+    """Raised when an ingestion job references a missing document."""
+
+    def __init__(self, document_id: UUID) -> None:
+        self.document_id = document_id
+        super().__init__(f"Document {document_id} not found")
+
+
 class DocumentIngestionJobHandler:
     """Load and ingest one persisted document within a job-scoped session."""
 
@@ -31,12 +39,12 @@ class DocumentIngestionJobHandler:
         self._embedding = embedding
 
     async def handle(self, document_id: UUID) -> None:
-        """Ingest the document if it still exists; always close this job's session."""
+        """Ingest the document or raise if missing; close this job's session."""
 
         async with self._session_factory() as session:
             document = await DocumentRepository(session).get_by_id(document_id)
             if document is None:
-                return
+                raise DocumentNotFoundError(document_id)
 
             ingestion = DocumentIngestionService(
                 self._storage,
