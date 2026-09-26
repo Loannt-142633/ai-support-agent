@@ -55,18 +55,27 @@ def test_process_message_logs_and_propagates_handler_error_without_settling_mess
     message.reject.assert_not_awaited()
 
 
-def test_process_message_logs_invalid_body_without_calling_handler_or_settling_message(
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"document_id": "not-a-uuid"}',
+        b"{}",
+        b"not-json",
+    ],
+)
+def test_process_message_rejects_invalid_body_without_calling_handler(
+    body: bytes,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    message = make_message(b'{"document_id": "not-a-uuid"}')
+    message = make_message(body)
     handler = MagicMock()
     handler.handle = AsyncMock()
 
-    with caplog.at_level(logging.ERROR), pytest.raises(ValueError):
+    with caplog.at_level(logging.ERROR):
         asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
 
     handler.handle.assert_not_awaited()
-    assert "Failed to process document ingestion message message-1" in caplog.text
+    assert "Invalid document ingestion message message-1" in caplog.text
     message.ack.assert_not_awaited()
     message.nack.assert_not_awaited()
-    message.reject.assert_not_awaited()
+    message.reject.assert_awaited_once_with(requeue=False)

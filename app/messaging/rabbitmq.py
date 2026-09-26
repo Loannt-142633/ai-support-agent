@@ -52,7 +52,7 @@ class RabbitMQDocumentIngestionConsumer:
         self._handler = handler
 
     async def process_message(self, message: AbstractIncomingMessage) -> None:
-        """Acknowledge only after ingestion succeeds; leave failure policy to caller."""
+        """Reject invalid IDs; acknowledge only after successful ingestion."""
 
         try:
             payload = json.loads(message.body)
@@ -62,6 +62,12 @@ class RabbitMQDocumentIngestionConsumer:
                 raise ValueError("Invalid document ingestion message")
 
             document_id = UUID(payload["document_id"])
+        except (ValueError, UnicodeDecodeError):
+            logger.exception("Invalid document ingestion message %s", message.message_id)
+            await message.reject(requeue=False)
+            return
+
+        try:
             await self._handler.handle(document_id)
             await message.ack()
         except Exception:
