@@ -1,5 +1,7 @@
 """SQLAlchemy repository for uploaded documents."""
 
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document
@@ -10,6 +12,11 @@ class DocumentRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def get_by_id(self, document_id: UUID) -> Document | None:
+        """Return the document with this ID, or None if it does not exist."""
+
+        return await self._session.get(Document, document_id)
 
     async def create(
         self,
