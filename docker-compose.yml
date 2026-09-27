@@ -32,7 +32,7 @@ services:
   migrate:
     build:
       context: .
-      target: api
+      target: base
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@db:5432/ai_support_agent
@@ -43,7 +43,7 @@ services:
   rabbitmq-setup:
     build:
       context: .
-      target: api
+      target: base
     env_file: .env
     environment:
       RABBITMQ_URL: amqp://app:app@rabbitmq:5672/
@@ -91,7 +91,7 @@ services:
   ticket-worker:
     build:
       context: .
-      target: api
+      target: base
     stop_grace_period: 30m
     env_file: .env
     environment:

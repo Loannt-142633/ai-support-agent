@@ -1,6 +1,7 @@
 """Ticket API schemas."""
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,3 +52,11 @@ class TicketListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class SuggestedAnswerResponse(BaseModel):
+    """A review-only draft; no customer-facing action has been performed."""
+
+    ticket_id: UUID
+    status: Literal["draft"] = "draft"
+    suggested_answer: str

@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.dependencies import (
+    get_suggested_answer_service,
     get_ticket_ai_analysis_repository,
     get_ticket_repository,
     get_ticket_service,
@@ -13,11 +14,18 @@ from app.api.dependencies import (
 from app.models.ticket import TicketCategory, TicketPriority, TicketStatus
 from app.repositories.ticket_ai_analysis_repository import TicketAIAnalysisRepository
 from app.repositories.ticket_repository import TicketRepository
-from app.schemas.ticket import TicketCreate, TicketListResponse, TicketResponse, TicketUpdate
+from app.schemas.ticket import (
+    SuggestedAnswerResponse,
+    TicketCreate,
+    TicketListResponse,
+    TicketResponse,
+    TicketUpdate,
+)
 from app.schemas.ticket_ai_analysis import (
     TicketAnalysisCompletedResponse,
     TicketAnalysisPendingResponse,
 )
+from app.services.suggested_answer_service import SuggestedAnswerService
 from app.services.ticket_service import TicketService
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -25,6 +33,9 @@ TicketServiceDependency = Annotated[TicketService, Depends(get_ticket_service)]
 TicketRepositoryDependency = Annotated[TicketRepository, Depends(get_ticket_repository)]
 TicketAIAnalysisRepositoryDependency = Annotated[
     TicketAIAnalysisRepository, Depends(get_ticket_ai_analysis_repository)
+]
+SuggestedAnswerServiceDependency = Annotated[
+    SuggestedAnswerService, Depends(get_suggested_answer_service)
 ]
 
 
@@ -96,6 +107,20 @@ async def get_ticket_analysis(
         summary=analysis.summary,
         requires_human=analysis.requires_human,
     )
+
+
+@router.post("/{ticket_id}/suggested-answer", response_model=SuggestedAnswerResponse)
+async def create_suggested_answer(
+    ticket_id: UUID,
+    service: SuggestedAnswerServiceDependency,
+) -> SuggestedAnswerResponse:
+    """Generate a grounded draft for staff review without sending it."""
+
+    try:
+        answer = await service.generate(ticket_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail="Ticket not found") from error
+    return SuggestedAnswerResponse(ticket_id=ticket_id, suggested_answer=answer)
 
 
 @router.patch("/{ticket_id}", response_model=TicketResponse)

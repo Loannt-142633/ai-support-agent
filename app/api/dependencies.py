@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.embeddings.client import EmbeddingClient
 from app.embeddings.e5 import E5EmbeddingModel
 from app.llm.client import LLMClient
+from app.llm.deferred import DeferredLLMClient
 from app.llm.providers.gemini import GeminiLLMClient
 from app.messaging.rabbitmq import (
     RabbitMQDocumentIngestionPublisher,
@@ -31,6 +32,7 @@ from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
 from app.services.rag_service import RAGService
 from app.services.retrieval_service import RetrievalService
+from app.services.suggested_answer_service import SuggestedAnswerService
 from app.services.ticket_analysis_publisher import TicketAnalysisPublisher
 from app.services.ticket_analysis_service import TicketAnalysisService
 from app.services.ticket_service import TicketService
@@ -195,6 +197,15 @@ def get_rag_service(
     """Build grounded question answering for the current request."""
 
     return RAGService(retrieval, llm_client)
+
+
+def get_suggested_answer_service(
+    tickets: Annotated[TicketRepository, Depends(get_ticket_repository)],
+    retrieval: Annotated[RetrievalService, Depends(get_retrieval_service)],
+) -> SuggestedAnswerService:
+    """Build drafting without initializing Gemini for missing tickets or empty context."""
+
+    return SuggestedAnswerService(tickets, RAGService(retrieval, DeferredLLMClient(get_llm_client)))
 
 
 def get_ticket_analysis_service(llm_client: LLMClientDependency) -> TicketAnalysisService:

@@ -36,6 +36,13 @@ def test_answer_retrieves_context_and_calls_llm_with_grounded_prompt() -> None:
     request = llm_client.generate_structured.await_args.kwargs
     assert request["response_model"] is RAGAnswer
     assert request["prompt"].startswith("INSTRUCTION\n\n- Answer only using")
+    assert "the order amount alone does not establish refund eligibility" in request["prompt"]
+    assert "Do not promise or confirm a refund based only on the amount" in request["prompt"]
+    assert "which eligibility conditions or customer facts still need verification" in request[
+        "prompt"
+    ]
+    assert "state the\n  corresponding approval level" in request["prompt"]
+    assert "Approval requirements do not confirm eligibility" in request["prompt"]
     assert "[Chunk 1]\nRefunds above USD 500 require manager approval." in request["prompt"]
     assert "[Chunk 2]\nEligible refunds require payment verification." in request["prompt"]
     assert request["prompt"].endswith(

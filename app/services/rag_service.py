@@ -63,6 +63,13 @@ class RAGService:
   say that the available information is insufficient.
 - Do not claim that an action was executed.
 - Clearly distinguish a policy requirement from a recommendation.
+- For refund requests, the order amount alone does not establish refund eligibility.
+  Do not promise or confirm a refund based only on the amount.
+- State which eligibility conditions or customer facts still need verification,
+  using only the provided context. If the context does not specify them, say so.
+- If the context defines an approval threshold for the amount, state the
+  corresponding approval level. Approval requirements do not confirm eligibility.
+  If the approval level cannot be determined from the context, say so.
 
 CONTEXT
 {context}

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000"]
     database_url: str = "postgresql+psycopg://app:app@localhost:5432/ai_support_agent"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
     gemini_timeout: float = 30.0
     embedding_model: str = "intfloat/multilingual-e5-base"
     embedding_dimension: int = 768

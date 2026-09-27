@@ -35,6 +35,13 @@ Both containers connect to PostgreSQL at `db:5432` and RabbitMQ at
 `rabbitmq:5672`, and share uploaded files through the `uploads_data` Docker
 volume. Set `GEMINI_API_KEY` in `.env` when using Gemini.
 
+Docker installs dependencies from `pyproject.toml` before copying application
+source, so a Python code change reuses the dependency layers. BuildKit keeps
+downloaded pip packages in a cache mount. API and document worker include the
+E5 embedding packages; migration setup, RabbitMQ setup, and ticket worker use
+the smaller base image. The first build after changing dependencies still needs
+to download them; later builds reuse the cache.
+
 For local Python development outside Docker, install dependencies with:
 
 ```powershell
@@ -146,6 +153,13 @@ The response also includes `ticket_id`; an unknown ticket returns 404. Both
 states use HTTP 200 because this is a read endpoint. `pending` means only
 "no result in DB yet": the API cannot currently distinguish a running job
 from a job lost between commit and publish or rejected to the failed queue.
+
+Support staff can call `POST /api/v1/tickets/{ticket_id}/suggested-answer`
+to generate a review-only draft from the ticket title and description. It
+uses the existing RAG knowledge base and returns `ticket_id`,
+`status: "draft"`, and `suggested_answer`; it does not save or send a reply.
+If retrieval finds no suitable chunks, the existing insufficient-information
+answer is returned. An unknown ticket returns 404.
 
 As with document uploads, a DB commit can succeed while publishing fails;
 the ticket then remains saved without a queued analysis job. This gap needs

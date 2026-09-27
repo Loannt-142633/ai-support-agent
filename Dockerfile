@@ -1,23 +1,48 @@
-FROM python:3.12-slim AS base
+# syntax=docker/dockerfile:1
+
+FROM python:3.12-slim AS dependencies
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY pyproject.toml README.md alembic.ini ./
+COPY pyproject.toml ./
+COPY scripts/install_dependencies.py ./scripts/install_dependencies.py
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python scripts/install_dependencies.py base
+
+FROM dependencies AS embedding-dependencies
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python scripts/install_dependencies.py embeddings
+
+FROM dependencies AS base
+
+COPY README.md alembic.ini ./
 COPY app ./app
 COPY migrations ./migrations
 
-RUN pip install --no-cache-dir .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --no-build-isolation --no-deps . && \
+    python -m pip check
 
-FROM base AS worker
+FROM embedding-dependencies AS embedding-app
 
-RUN pip install --no-cache-dir ".[embeddings]"
+COPY README.md alembic.ini ./
+COPY app ./app
+COPY migrations ./migrations
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --no-build-isolation --no-deps . && \
+    python -m pip check
+
+FROM embedding-app AS worker
 
 CMD ["ai-support-worker"]
 
-FROM base AS api
+FROM embedding-app AS api
 
 EXPOSE 8000
 
