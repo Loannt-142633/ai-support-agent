@@ -1,18 +1,50 @@
 """RabbitMQ messaging for document ingestion jobs."""
 
+import asyncio
 import json
 import logging
 from uuid import UUID
 
 import aio_pika
+import psycopg
 from aio_pika.abc import AbstractIncomingMessage
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from app.jobs.document_ingestion_handler import (
     DocumentIngestionJobHandler,
     DocumentNotFoundError,
 )
+from app.parsers.document import DocumentParseError
 
 logger = logging.getLogger(__name__)
+_MAX_HANDLER_ATTEMPTS = 3
+_RETRY_DELAY_SECONDS = 3
+_RETRYABLE_SQLSTATES = {"53300", "57P01", "57P02", "57P03"}
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    """Retry only recognized connection/checkout failures, not bad documents."""
+
+    if isinstance(error, DocumentParseError):
+        # PDF syntax errors and missing/inaccessible files are not transient.
+        return isinstance(error.__cause__, (ConnectionError, TimeoutError))
+    if isinstance(error, SQLAlchemyTimeoutError):
+        return True  # Timed out waiting for a DB connection from the pool.
+    if not isinstance(error, DBAPIError):
+        return False
+    if error.connection_invalidated:
+        return True
+
+    sqlstate = getattr(error.orig, "sqlstate", None)
+    if isinstance(sqlstate, str):
+        return sqlstate.startswith("08") or sqlstate in _RETRYABLE_SQLSTATES
+    # A failed initial connection often has no SQLSTATE and is not marked
+    # invalidated because there was no established connection to invalidate.
+    return isinstance(
+        error.orig,
+        (psycopg.OperationalError, psycopg.InterfaceError, ConnectionError, TimeoutError),
+    )
 
 
 class RabbitMQDocumentIngestionPublisher:
@@ -31,9 +63,7 @@ class RabbitMQDocumentIngestionPublisher:
 
         connection = await aio_pika.connect_robust(self._url, timeout=5)
         async with connection:
-            channel = await connection.channel(
-                publisher_confirms=True, on_return_raises=True
-            )
+            channel = await connection.channel(publisher_confirms=True, on_return_raises=True)
             await channel.declare_queue(self._queue_name, durable=True)
             message = aio_pika.Message(
                 body=json.dumps({"document_id": str(document_id)}).encode("utf-8"),
@@ -55,13 +85,11 @@ class RabbitMQDocumentIngestionConsumer:
         self._handler = handler
 
     async def process_message(self, message: AbstractIncomingMessage) -> None:
-        """Reject invalid IDs; acknowledge only after successful ingestion."""
+        """Retry transient failures while retaining delivery; then ACK or reject."""
 
         try:
             payload = json.loads(message.body)
-            if not isinstance(payload, dict) or not isinstance(
-                payload.get("document_id"), str
-            ):
+            if not isinstance(payload, dict) or not isinstance(payload.get("document_id"), str):
                 raise ValueError("Invalid document ingestion message")
 
             document_id = UUID(payload["document_id"])
@@ -70,31 +98,47 @@ class RabbitMQDocumentIngestionConsumer:
             await message.reject(requeue=False)
             return
 
-        try:
-            await self._handler.handle(document_id)
-        except DocumentNotFoundError:
-            logger.exception(
-                "Document %s not found for ingestion message %s",
-                document_id,
-                message.message_id,
-            )
-            await message.reject(requeue=False)
-            return
-        except Exception:
-            logger.exception(
-                "Failed to ingest document %s from message %s",
-                document_id,
-                message.message_id,
-            )
-            await message.reject(requeue=False)
-            return
+        for attempt in range(1, _MAX_HANDLER_ATTEMPTS + 1):
+            try:
+                await self._handler.handle(document_id)
+            except DocumentNotFoundError:
+                logger.exception(
+                    "Document %s not found for ingestion message %s",
+                    document_id,
+                    message.message_id,
+                )
+                await message.reject(requeue=False)
+                return
+            except Exception as error:
+                if attempt < _MAX_HANDLER_ATTEMPTS and _is_retryable_error(error):
+                    logger.warning(
+                        "Transient ingestion failure for document %s from message %s "
+                        "(attempt %s/%s); retrying in %s seconds: %s",
+                        document_id,
+                        message.message_id,
+                        attempt,
+                        _MAX_HANDLER_ATTEMPTS,
+                        _RETRY_DELAY_SECONDS,
+                        error,
+                    )
+                    await asyncio.sleep(_RETRY_DELAY_SECONDS)
+                    continue
+                logger.exception(
+                    "Failed to ingest document %s from message %s after %s "
+                    "attempt(s); rejecting without requeue",
+                    document_id,
+                    message.message_id,
+                    attempt,
+                )
+                await message.reject(requeue=False)
+                return
+            else:
+                break
 
         try:
             await message.ack()
         except Exception:
-            logger.exception(
-                "Failed to ACK document ingestion message %s", message.message_id
-            )
+            logger.exception("Failed to ACK document ingestion message %s", message.message_id)
             raise
         logger.info(
             "Document ingestion completed; ACK sent for document_id=%s message_id=%s",

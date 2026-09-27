@@ -92,15 +92,20 @@ $env:RABBITMQ_URL = "amqp://app:app@localhost:5672/"
 For host-based development, run the API against the same document storage path;
 the worker opens the path saved with each uploaded document.
 
-The worker ACKs successful jobs and rejects malformed or missing-document jobs
-without requeue. Other handler failures are also rejected without requeue for
-manual review. A `rabbitmq-setup` service declares the durable
-`document.ingestion.dlx` direct exchange, the durable
+The worker tries a handler up to three times for recognized transient DB
+connection/pool checkout failures or parser read connection failures/timeouts,
+waiting three seconds between attempts.
+The same delivery stays Unacked during each wait; the worker sends no NACK.
+It ACKs once after success, or logs the failure and rejects without requeue
+after the third attempt. Malformed messages, missing documents, corrupt PDFs,
+and documents without extractable text are rejected immediately. Other handler
+failures are also rejected without requeue. A `rabbitmq-setup` service declares
+the durable `document.ingestion.dlx` direct exchange, the durable
 `document.ingestion.failed` queue, and their binding. It applies a policy to
 `document.ingestion` with `dead-letter-exchange=document.ingestion.dlx` and
 `dead-letter-routing-key=document.ingestion.failed`. Rejected messages can be
-inspected in the RabbitMQ management UI at http://localhost:15672; they are not
-retried automatically. The failed message carries RabbitMQ's `x-death` header;
+inspected in the RabbitMQ management UI at http://localhost:15672. The failed
+message carries RabbitMQ's `x-death` header;
 the exception traceback remains in worker logs. The worker sets
 `prefetch_count=1`, so each consumer receives at most one unacknowledged job at
 a time.
