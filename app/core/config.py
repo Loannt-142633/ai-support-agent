@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://app:app@localhost:5672/"
     rabbitmq_management_url: str = "http://localhost:15672"
     document_ingestion_queue: str = "document.ingestion"
+    ticket_analysis_queue: str = "ticket.analysis"
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 

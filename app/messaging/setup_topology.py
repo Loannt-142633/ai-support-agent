@@ -1,4 +1,4 @@
-"""Provision the document ingestion dead-letter route through RabbitMQ's HTTP API."""
+"""Provision durable job queues and dead-letter routes through RabbitMQ's HTTP API."""
 
 import base64
 import json
@@ -12,16 +12,14 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def configure_document_ingestion_topology(
-    *, rabbitmq_url: str, management_url: str, queue_name: str
-) -> None:
+def _configure_job_topology(*, rabbitmq_url: str, management_url: str, queue_name: str) -> None:
     """Declare both queues, the DLX/binding, and an updateable DLX policy."""
 
     connection = urlsplit(rabbitmq_url)
     if connection.username is None or connection.password is None:
         raise ValueError("RabbitMQ URL must include management credentials")
     if not queue_name.strip():
-        raise ValueError("Document ingestion queue name must not be empty")
+        raise ValueError("Queue name must not be empty")
 
     vhost = quote(unquote(connection.path.lstrip("/")) or "/", safe="")
     authorization = base64.b64encode(
@@ -82,6 +80,30 @@ def configure_document_ingestion_topology(
     logger.info("Configured dead-letter route for %s to %s", queue_name, failed_queue_name)
 
 
+def configure_document_ingestion_topology(
+    *, rabbitmq_url: str, management_url: str, queue_name: str
+) -> None:
+    """Provision the document ingestion queue and its dead-letter route."""
+
+    _configure_job_topology(
+        rabbitmq_url=rabbitmq_url,
+        management_url=management_url,
+        queue_name=queue_name,
+    )
+
+
+def configure_ticket_analysis_topology(
+    *, rabbitmq_url: str, management_url: str, queue_name: str
+) -> None:
+    """Provision the ticket analysis queue and its dead-letter route."""
+
+    _configure_job_topology(
+        rabbitmq_url=rabbitmq_url,
+        management_url=management_url,
+        queue_name=queue_name,
+    )
+
+
 def main() -> None:
     """Configure the broker before API publishers and workers start."""
 
@@ -91,6 +113,11 @@ def main() -> None:
         rabbitmq_url=settings.rabbitmq_url,
         management_url=settings.rabbitmq_management_url,
         queue_name=settings.document_ingestion_queue,
+    )
+    configure_ticket_analysis_topology(
+        rabbitmq_url=settings.rabbitmq_url,
+        management_url=settings.rabbitmq_management_url,
+        queue_name=settings.ticket_analysis_queue,
     )
 
 

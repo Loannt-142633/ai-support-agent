@@ -15,6 +15,8 @@ from app.jobs.document_ingestion_handler import (
     DocumentIngestionJobHandler,
     DocumentNotFoundError,
 )
+from app.jobs.ticket_analysis_handler import TicketAnalysisJobHandler, TicketNotFoundError
+from app.llm.exceptions import LLMRateLimitError, LLMTimeoutError
 from app.models.document import DocumentStatus
 from app.parsers.document import DocumentParseError
 from app.services.document_ingestion_service import NoExtractableTextError
@@ -84,6 +86,37 @@ class RabbitMQDocumentIngestionPublisher:
                 content_type="application/json",
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                 message_id=str(document_id),
+            )
+            await channel.default_exchange.publish(
+                message,
+                routing_key=self._queue_name,
+                mandatory=True,
+            )
+
+
+class RabbitMQTicketAnalysisPublisher:
+    """Publish persisted ticket IDs to a durable RabbitMQ queue."""
+
+    def __init__(self, *, url: str, queue_name: str) -> None:
+        if not url.strip():
+            raise ValueError("RabbitMQ URL must not be empty")
+        if not queue_name.strip():
+            raise ValueError("Ticket analysis queue name must not be empty")
+        self._url = url
+        self._queue_name = queue_name
+
+    async def publish(self, ticket_id: UUID) -> None:
+        """Publish a persistent JSON job after ticket metadata is committed."""
+
+        connection = await aio_pika.connect_robust(self._url, timeout=5)
+        async with connection:
+            channel = await connection.channel(publisher_confirms=True, on_return_raises=True)
+            await channel.declare_queue(self._queue_name, durable=True)
+            message = aio_pika.Message(
+                body=json.dumps({"ticket_id": str(ticket_id)}).encode("utf-8"),
+                content_type="application/json",
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                message_id=str(ticket_id),
             )
             await channel.default_exchange.publish(
                 message,
@@ -175,5 +208,73 @@ class RabbitMQDocumentIngestionConsumer:
         logger.info(
             "Document ingestion completed; ACK sent for document_id=%s message_id=%s",
             document_id,
+            message.message_id,
+        )
+
+
+class RabbitMQTicketAnalysisConsumer:
+    """Analyze one delivered ticket ID and settle the RabbitMQ message."""
+
+    def __init__(self, handler: TicketAnalysisJobHandler) -> None:
+        self._handler = handler
+
+    async def process_message(self, message: AbstractIncomingMessage) -> None:
+        try:
+            payload = json.loads(message.body)
+            if not isinstance(payload, dict) or not isinstance(payload.get("ticket_id"), str):
+                raise ValueError("Invalid ticket analysis message")
+            ticket_id = UUID(payload["ticket_id"])
+        except (ValueError, UnicodeDecodeError):
+            logger.exception("Invalid ticket analysis message %s", message.message_id)
+            await message.reject(requeue=False)
+            return
+
+        for attempt in range(1, _MAX_HANDLER_ATTEMPTS + 1):
+            try:
+                await self._handler.handle(ticket_id)
+            except TicketNotFoundError:
+                logger.exception(
+                    "Ticket %s not found for analysis message %s",
+                    ticket_id,
+                    message.message_id,
+                )
+                await message.reject(requeue=False)
+                return
+            except Exception as error:
+                if attempt < _MAX_HANDLER_ATTEMPTS and (
+                    _is_retryable_error(error)
+                    or isinstance(error, (LLMTimeoutError, LLMRateLimitError))
+                ):
+                    logger.warning(
+                        "Transient ticket analysis failure for %s (attempt %s/%s); "
+                        "retrying in %s seconds",
+                        ticket_id,
+                        attempt,
+                        _MAX_HANDLER_ATTEMPTS,
+                        _RETRY_DELAY_SECONDS,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(_RETRY_DELAY_SECONDS)
+                    continue
+                logger.exception(
+                    "Failed to analyze ticket %s from message %s after %s attempt(s); "
+                    "rejecting without requeue",
+                    ticket_id,
+                    message.message_id,
+                    attempt,
+                )
+                await message.reject(requeue=False)
+                return
+            else:
+                break
+
+        try:
+            await message.ack()
+        except Exception:
+            logger.exception("Failed to ACK ticket analysis message %s", message.message_id)
+            raise
+        logger.info(
+            "Ticket analysis completed; ACK sent for ticket_id=%s message_id=%s",
+            ticket_id,
             message.message_id,
         )

@@ -5,7 +5,10 @@ from urllib.error import URLError
 from urllib.request import Request
 
 import pytest
-from app.messaging.setup_topology import configure_document_ingestion_topology
+from app.messaging.setup_topology import (
+    configure_document_ingestion_topology,
+    configure_ticket_analysis_topology,
+)
 
 
 def test_configures_complete_dead_letter_route_with_queue_policy() -> None:
@@ -45,11 +48,15 @@ def test_configures_complete_dead_letter_route_with_queue_policy() -> None:
         "internal": False,
         "arguments": {},
     }
-    assert bodies[1] == bodies[3] == {
-        "durable": True,
-        "auto_delete": False,
-        "arguments": {},
-    }
+    assert (
+        bodies[1]
+        == bodies[3]
+        == {
+            "durable": True,
+            "auto_delete": False,
+            "arguments": {},
+        }
+    )
     assert bodies[2] == {"routing_key": "document.ingestion.failed", "arguments": {}}
     assert bodies[4] == {
         "pattern": "^document\\.ingestion$",
@@ -88,3 +95,34 @@ def test_setup_stops_before_policy_when_binding_fails() -> None:
 
     assert len(requests) == 3
     assert requests[-1].get_method() == "POST"
+
+
+def test_configures_ticket_analysis_durable_queue_and_dead_letter_route() -> None:
+    requests: list[Request] = []
+
+    def send(request: Request, *, timeout: int) -> MagicMock:
+        assert timeout == 10
+        requests.append(request)
+        return MagicMock()
+
+    with patch("app.messaging.setup_topology.urlopen", side_effect=send):
+        configure_ticket_analysis_topology(
+            rabbitmq_url="amqp://app:app@rabbitmq:5672/",
+            management_url="http://rabbitmq:15672",
+            queue_name="ticket.analysis",
+        )
+
+    assert [request.full_url for request in requests] == [
+        "http://rabbitmq:15672/api/exchanges/%2F/ticket.analysis.dlx",
+        "http://rabbitmq:15672/api/queues/%2F/ticket.analysis.failed",
+        "http://rabbitmq:15672/api/bindings/%2F/e/ticket.analysis.dlx/q/ticket.analysis.failed",
+        "http://rabbitmq:15672/api/queues/%2F/ticket.analysis",
+        "http://rabbitmq:15672/api/policies/%2F/ticket.analysis-dlx",
+    ]
+    bodies = [json.loads(request.data or b"") for request in requests]
+    assert bodies[1] == bodies[3] == {"durable": True, "auto_delete": False, "arguments": {}}
+    assert bodies[2]["routing_key"] == "ticket.analysis.failed"
+    assert bodies[4]["definition"] == {
+        "dead-letter-exchange": "ticket.analysis.dlx",
+        "dead-letter-routing-key": "ticket.analysis.failed",
+    }

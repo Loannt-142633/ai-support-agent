@@ -8,6 +8,8 @@ from app.schemas.ticket_ai_analysis import TicketAIAnalysisOutput
 class TicketAnalysisService:
     """Build a ticket analysis request and return the validated AI output."""
 
+    prompt_version = "v1"
+
     def __init__(self, llm_client: LLMClient) -> None:
         self._llm_client = llm_client
 

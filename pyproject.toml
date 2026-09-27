@@ -38,6 +38,7 @@ dev = [
 [project.scripts]
 ai-support-agent = "app.main:run"
 ai-support-worker = "app.worker:main"
+ai-support-ticket-worker = "app.ticket_worker:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -13,7 +13,10 @@ from app.embeddings.client import EmbeddingClient
 from app.embeddings.e5 import E5EmbeddingModel
 from app.llm.client import LLMClient
 from app.llm.providers.gemini import GeminiLLMClient
-from app.messaging.rabbitmq import RabbitMQDocumentIngestionPublisher
+from app.messaging.rabbitmq import (
+    RabbitMQDocumentIngestionPublisher,
+    RabbitMQTicketAnalysisPublisher,
+)
 from app.parsers.document import DocumentParser
 from app.parsers.pdf import PDFDocumentParser
 from app.repositories.document_chunk_repository import DocumentChunkRepository
@@ -27,6 +30,7 @@ from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
 from app.services.rag_service import RAGService
 from app.services.retrieval_service import RetrievalService
+from app.services.ticket_analysis_publisher import TicketAnalysisPublisher
 from app.services.ticket_analysis_service import TicketAnalysisService
 from app.services.ticket_service import TicketService
 from app.services.user_service import UserService
@@ -103,10 +107,23 @@ def get_user_service(session: DbSession) -> UserService:
     return UserService(UserRepository(session), session)
 
 
-def get_ticket_service(session: DbSession) -> TicketService:
+def get_ticket_analysis_publisher() -> TicketAnalysisPublisher:
+    """Build the RabbitMQ publisher for ticket analysis jobs."""
+
+    settings = get_settings()
+    return RabbitMQTicketAnalysisPublisher(
+        url=settings.rabbitmq_url,
+        queue_name=settings.ticket_analysis_queue,
+    )
+
+
+def get_ticket_service(
+    session: DbSession,
+    publisher: Annotated[TicketAnalysisPublisher, Depends(get_ticket_analysis_publisher)],
+) -> TicketService:
     """Build a ticket service for the current request."""
 
-    return TicketService(TicketRepository(session), UserRepository(session), session)
+    return TicketService(TicketRepository(session), UserRepository(session), session, publisher)
 
 
 def get_document_ingestion_publisher() -> DocumentIngestionPublisher:

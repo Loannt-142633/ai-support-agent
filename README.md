@@ -22,7 +22,7 @@ ai-support-agent/
 
 ## Setup
 
-Create `.env` from `.env.example`, then start the API, worker, PostgreSQL, and RabbitMQ:
+Create `.env` from `.env.example`, then start the API, workers, PostgreSQL, and RabbitMQ:
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
@@ -122,6 +122,26 @@ worker stops after committing `processing`, a redelivered job may run again;
 existing chunks are recognized as completed so they are not duplicated. If
 the DB is unavailable when recording failure, the message is still rejected
 to the failed queue and the status may remain `processing` until replayed.
+
+## RabbitMQ ticket analysis
+
+After a ticket is committed, the API publishes a persistent
+`{"ticket_id":"<uuid>"}` message to the durable `ticket.analysis` queue.
+The `rabbitmq-setup` service also provisions its dead-letter exchange,
+`ticket.analysis.failed` queue, binding, and queue policy. Set
+`TICKET_ANALYSIS_QUEUE` to override the source queue name. The independent
+`ticket-worker` uses Gemini to classify, prioritize, summarize, and decide
+whether human review is needed, then persists one `ticket_ai_analysis` record.
+Set `GEMINI_API_KEY` before starting it. To run it on the host, use
+`python -m app.ticket_worker`; Compose starts it with the other services.
+It ACKs completed jobs (including sequential redeliveries), retries recognized
+temporary DB, LLM timeout, and rate-limit failures up to three attempts, and
+rejects terminal failures to `ticket.analysis.failed`. The existing-analysis
+check prevents sequential duplicates; concurrent workers processing the same
+ticket are not yet protected against duplicate records.
+As with document uploads, a DB commit can succeed while publishing fails;
+the ticket then remains saved without a queued analysis job. This gap needs
+an outbox or equivalent reliability mechanism in a later step.
 
 ## Run
 

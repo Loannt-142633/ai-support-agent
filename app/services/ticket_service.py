@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ticket import Ticket, TicketCategory, TicketPriority, TicketStatus
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
+from app.services.ticket_analysis_publisher import TicketAnalysisPublisher
 
 
 class TicketService:
@@ -18,10 +19,12 @@ class TicketService:
         ticket_repository: TicketRepository,
         user_repository: UserRepository,
         session: AsyncSession,
+        analysis_publisher: TicketAnalysisPublisher,
     ) -> None:
         self._tickets = ticket_repository
         self._users = user_repository
         self._session = session
+        self._analysis_publisher = analysis_publisher
 
     async def create(
         self,
@@ -42,11 +45,16 @@ class TicketService:
                 priority=priority,
             )
             await self._session.commit()
-            await self._session.refresh(ticket)
-            return ticket
         except IntegrityError as error:
             await self._session.rollback()
             raise LookupError("User not found") from error
+        except Exception:
+            await self._session.rollback()
+            raise
+
+        await self._analysis_publisher.publish(ticket.id)
+        await self._session.refresh(ticket)
+        return ticket
 
     async def get(self, ticket_id: UUID) -> Ticket:
         ticket = await self._tickets.get(ticket_id)

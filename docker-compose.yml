@@ -88,6 +88,21 @@ services:
         condition: service_completed_successfully
     volumes:
       - uploads_data:/app/uploads
+  ticket-worker:
+    build:
+      context: .
+      target: api
+    stop_grace_period: 30m
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:app@db:5432/ai_support_agent
+      RABBITMQ_URL: amqp://app:app@rabbitmq:5672/
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq-setup:
+        condition: service_completed_successfully
+    command: ["python", "-m", "app.ticket_worker"]
 
 volumes:
   postgres_data:
