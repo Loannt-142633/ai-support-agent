@@ -156,10 +156,15 @@ from a job lost between commit and publish or rejected to the failed queue.
 
 Support staff can call `POST /api/v1/tickets/{ticket_id}/suggested-answer`
 to generate a review-only draft from the ticket title and description. It
-uses the existing RAG knowledge base and returns `ticket_id`,
-`status: "draft"`, and `suggested_answer`; it does not save or send a reply.
-If retrieval finds no suitable chunks, the existing insufficient-information
-answer is returned. An unknown ticket returns 404.
+uses the existing RAG knowledge base and saves the answer in
+`ticket_suggested_answers` with `draft_id`, `ticket_id`, `ai_content`,
+`status: "draft"`, and `created_at`. The response also includes the chunk
+references (`document_id` and `chunk_index`) supplied to the prompt, in order.
+`GET /api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}` opens the saved
+draft without calling retrieval or the LLM. A draft belonging to another ticket
+returns 404. No reply is sent to the customer. If retrieval finds no suitable
+chunks, the insufficient-information answer is saved with no sources. An
+unknown ticket returns 404.
 
 As with document uploads, a DB commit can succeed while publishing fails;
 the ticket then remains saved without a queued analysis job. This gap needs

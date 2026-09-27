@@ -1,9 +1,19 @@
 """Retrieval-augmented question answering workflow."""
 
+from dataclasses import dataclass
+
 from app.llm.client import LLMClient
 from app.repositories.document_chunk_repository import SimilarDocumentChunk
 from app.schemas.rag import RAGAnswer
 from app.services.retrieval_service import RetrievalService
+
+
+@dataclass(frozen=True)
+class RAGResult:
+    """Answer and the exact retrieved chunks supplied as context to the LLM."""
+
+    answer: str
+    chunks: tuple[SimilarDocumentChunk, ...]
 
 
 class RAGService:
@@ -23,7 +33,7 @@ class RAGService:
         *,
         top_k: int = 3,
         document_type: str | None = None,
-    ) -> str:
+    ) -> RAGResult:
         """Answer a question using only retrieved document chunks."""
 
         normalized_question = question.strip()
@@ -36,13 +46,13 @@ class RAGService:
             document_type=document_type,
         )
         if not chunks:
-            return self.INSUFFICIENT_INFORMATION_ANSWER
+            return RAGResult(self.INSUFFICIENT_INFORMATION_ANSWER, ())
 
         response = await self._llm_client.generate_structured(
             prompt=self._build_prompt(normalized_question, chunks),
             response_model=RAGAnswer,
         )
-        return response.answer
+        return RAGResult(response.answer, tuple(chunks))
 
     @staticmethod
     def _build_prompt(

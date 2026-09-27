@@ -27,7 +27,8 @@ def test_answer_retrieves_context_and_calls_llm_with_grounded_prompt() -> None:
         )
     )
 
-    assert result == "A $600 refund requires manager approval."
+    assert result.answer == "A $600 refund requires manager approval."
+    assert result.chunks == tuple(retrieval.retrieve.return_value)
     retrieval.retrieve.assert_awaited_once_with(
         "Can I get a refund for a $600 order?",
         top_k=3,
@@ -57,7 +58,8 @@ def test_answer_returns_insufficient_information_without_calling_llm() -> None:
 
     result = asyncio.run(RAGService(retrieval, llm_client).answer("Unknown policy?"))
 
-    assert result == RAGService.INSUFFICIENT_INFORMATION_ANSWER
+    assert result.answer == RAGService.INSUFFICIENT_INFORMATION_ANSWER
+    assert result.chunks == ()
     retrieval.retrieve.assert_awaited_once_with(
         "Unknown policy?", top_k=3, document_type=None
     )

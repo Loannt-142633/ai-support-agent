@@ -117,10 +117,25 @@ async def create_suggested_answer(
     """Generate a grounded draft for staff review without sending it."""
 
     try:
-        answer = await service.generate(ticket_id)
+        draft = await service.generate(ticket_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail="Ticket not found") from error
-    return SuggestedAnswerResponse(ticket_id=ticket_id, suggested_answer=answer)
+    return SuggestedAnswerResponse.model_validate(draft)
+
+
+@router.get(
+    "/{ticket_id}/suggested-answers/{draft_id}", response_model=SuggestedAnswerResponse
+)
+async def get_suggested_answer(
+    ticket_id: UUID, draft_id: UUID, service: SuggestedAnswerServiceDependency
+) -> SuggestedAnswerResponse:
+    """Open a saved draft without retrieval or another LLM call."""
+
+    try:
+        draft = await service.get(ticket_id, draft_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return SuggestedAnswerResponse.model_validate(draft)
 
 
 @router.patch("/{ticket_id}", response_model=TicketResponse)

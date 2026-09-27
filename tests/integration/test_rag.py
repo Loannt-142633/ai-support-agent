@@ -125,7 +125,8 @@ def test_irrelevant_retrieval_returns_insufficient_without_calling_llm(policy_pd
                 IRRELEVANT_QUESTION, top_k=3, document_type=document_type
             )
 
-            assert answer == RAGService.INSUFFICIENT_INFORMATION_ANSWER
+            assert answer.answer == RAGService.INSUFFICIENT_INFORMATION_ANSWER
+            assert answer.chunks == ()
             llm.generate_structured.assert_not_awaited()
 
     asyncio.run(check())
@@ -169,8 +170,9 @@ def test_live_gemini_answers_with_relevant_refund_context(policy_pdf: None) -> N
                 for index, chunk in enumerate(chunks, start=1)
             ]
             assert positions == sorted(positions)
-            assert answer.strip()
-            assert "manager" in answer.lower()
-            assert "approv" in answer.lower()
+            assert answer.answer.strip()
+            assert answer.chunks == tuple(chunks)
+            assert "manager" in answer.answer.lower()
+            assert "approv" in answer.answer.lower()
 
     asyncio.run(check())

@@ -24,6 +24,7 @@ from app.repositories.document_chunk_repository import DocumentChunkRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.ticket_ai_analysis_repository import TicketAIAnalysisRepository
 from app.repositories.ticket_repository import TicketRepository
+from app.repositories.ticket_suggested_answer_repository import TicketSuggestedAnswerRepository
 from app.repositories.user_repository import UserRepository
 from app.services.chunking_service import ChunkingService
 from app.services.document_ingestion_publisher import DocumentIngestionPublisher
@@ -200,12 +201,18 @@ def get_rag_service(
 
 
 def get_suggested_answer_service(
+    session: DbSession,
     tickets: Annotated[TicketRepository, Depends(get_ticket_repository)],
     retrieval: Annotated[RetrievalService, Depends(get_retrieval_service)],
 ) -> SuggestedAnswerService:
     """Build drafting without initializing Gemini for missing tickets or empty context."""
 
-    return SuggestedAnswerService(tickets, RAGService(retrieval, DeferredLLMClient(get_llm_client)))
+    return SuggestedAnswerService(
+        tickets,
+        RAGService(retrieval, DeferredLLMClient(get_llm_client)),
+        TicketSuggestedAnswerRepository(session),
+        session,
+    )
 
 
 def get_ticket_analysis_service(llm_client: LLMClientDependency) -> TicketAnalysisService:

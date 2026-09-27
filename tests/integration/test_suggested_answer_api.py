@@ -1,86 +1,103 @@
-"""HTTP flow for generating a grounded, unsent support reply draft."""
+"""HTTP flow for persisting and reopening an unsent support reply draft."""
 
-from unittest.mock import AsyncMock
-from uuid import uuid4
+from unittest.mock import AsyncMock, patch
+from uuid import UUID, uuid4
 
-from app.api.dependencies import get_suggested_answer_service
+from app.api.dependencies import get_retrieval_service, get_ticket_analysis_publisher
 from app.main import app
-from app.models.ticket import Ticket
 from app.repositories.document_chunk_repository import SimilarDocumentChunk
 from app.schemas.rag import RAGAnswer
 from app.services.rag_service import RAGService
-from app.services.suggested_answer_service import SuggestedAnswerService
 
 
-def test_suggested_answer_uses_retrieved_policy_without_sending(client) -> None:
-    ticket_id = uuid4()
-    tickets = AsyncMock()
-    tickets.get.return_value = Ticket(
-        id=ticket_id,
-        title="Can I get a refund?",
-        description="My order was USD 600.",
+def _create_ticket(client) -> UUID:
+    app.dependency_overrides[get_ticket_analysis_publisher] = lambda: AsyncMock()
+    user = client.post(
+        "/api/v1/users", json={"name": "Ada Lovelace", "email": "ada@example.com"}
     )
+    assert user.status_code == 201
+    ticket = client.post(
+        "/api/v1/tickets",
+        json={
+            "user_id": user.json()["id"],
+            "title": "Can I get a refund?",
+            "description": "My order was USD 600.",
+        },
+    )
+    assert ticket.status_code == 201
+    return UUID(ticket.json()["id"])
+
+
+def test_suggested_answer_persists_sources_and_get_does_not_regenerate(client) -> None:
+    ticket_id = _create_ticket(client)
     retrieval = AsyncMock()
-    retrieval.retrieve.return_value = [
-        SimilarDocumentChunk(uuid4(), 0, "Refunds above USD 500 require manager approval.", 0.1)
-    ]
+    first = SimilarDocumentChunk(uuid4(), 4, "Manager approval above USD 500.", 0.1)
+    second = SimilarDocumentChunk(uuid4(), 2, "Verify payment eligibility.", 0.2)
+    retrieval.retrieve.return_value = [first, second]
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval
     llm = AsyncMock()
     llm.generate_structured.return_value = RAGAnswer(
-        answer="A USD 600 refund requires manager approval."
-    )
-    app.dependency_overrides[get_suggested_answer_service] = lambda: SuggestedAnswerService(
-        tickets, RAGService(retrieval, llm)
+        answer="Eligibility must be verified; manager approval is required."
     )
 
-    response = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+    with patch("app.api.dependencies.get_llm_client", return_value=llm):
+        created = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+        assert created.status_code == 200
+        body = created.json()
+        draft_id = UUID(body["draft_id"])
+        assert body["ticket_id"] == str(ticket_id)
+        assert body["status"] == "draft"
+        assert body["suggested_answer"] == (
+            "Eligibility must be verified; manager approval is required."
+        )
+        assert body["created_at"]
+        assert body["sources"] == [
+            {"document_id": str(first.document_id), "chunk_index": first.chunk_index},
+            {"document_id": str(second.document_id), "chunk_index": second.chunk_index},
+        ]
+        prompt = llm.generate_structured.await_args.kwargs["prompt"]
+        assert prompt.index(first.content) < prompt.index(second.content)
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "ticket_id": str(ticket_id),
-        "status": "draft",
-        "suggested_answer": "A USD 600 refund requires manager approval.",
-    }
+        reopened = client.get(f"/api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}")
+
+    assert reopened.status_code == 200
+    assert reopened.json() == body
     retrieval.retrieve.assert_awaited_once_with(
         "Can I get a refund?\n\nMy order was USD 600.", top_k=3, document_type=None
     )
-    prompt = llm.generate_structured.await_args.kwargs["prompt"]
-    assert "Refunds above USD 500 require manager approval." in prompt
-    assert prompt.endswith("QUESTION\nCan I get a refund?\n\nMy order was USD 600.")
+    llm.generate_structured.assert_awaited_once()
+
+    wrong_ticket = client.get(f"/api/v1/tickets/{uuid4()}/suggested-answers/{draft_id}")
+    assert wrong_ticket.status_code == 404
+    missing_draft = client.get(f"/api/v1/tickets/{ticket_id}/suggested-answers/{uuid4()}")
+    assert missing_draft.status_code == 404
 
 
-def test_suggested_answer_without_relevant_chunks_returns_existing_fallback(client) -> None:
-    ticket_id = uuid4()
-    tickets = AsyncMock()
-    tickets.get.return_value = Ticket(id=ticket_id, title="Unknown policy", description="Help?")
+def test_suggested_answer_without_relevant_chunks_persists_fallback(client) -> None:
+    ticket_id = _create_ticket(client)
     retrieval = AsyncMock()
     retrieval.retrieve.return_value = []
-    llm = AsyncMock()
-    app.dependency_overrides[get_suggested_answer_service] = lambda: SuggestedAnswerService(
-        tickets, RAGService(retrieval, llm)
-    )
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval
 
-    response = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+    with patch("app.api.dependencies.get_llm_client", side_effect=AssertionError("LLM called")):
+        response = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "ticket_id": str(ticket_id),
-        "status": "draft",
-        "suggested_answer": RAGService.INSUFFICIENT_INFORMATION_ANSWER,
-    }
-    llm.generate_structured.assert_not_awaited()
+    assert response.json()["suggested_answer"] == RAGService.INSUFFICIENT_INFORMATION_ANSWER
+    assert response.json()["sources"] == []
+    draft_id = response.json()["draft_id"]
+    reopened = client.get(f"/api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}")
+    assert reopened.json() == response.json()
 
 
-def test_suggested_answer_for_unknown_ticket_returns_404(client) -> None:
+def test_suggested_answer_for_unknown_ticket_returns_404_without_llm(client) -> None:
+    retrieval = AsyncMock()
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval
     ticket_id = uuid4()
-    tickets = AsyncMock()
-    tickets.get.return_value = None
-    rag = AsyncMock()
-    app.dependency_overrides[get_suggested_answer_service] = lambda: SuggestedAnswerService(
-        tickets, rag
-    )
 
-    response = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+    with patch("app.api.dependencies.get_llm_client", side_effect=AssertionError("LLM called")):
+        response = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Ticket not found"}
-    rag.answer.assert_not_awaited()
+    retrieval.retrieve.assert_not_awaited()
