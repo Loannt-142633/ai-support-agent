@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.dependencies import (
+    get_suggested_answer_delivery_service,
     get_suggested_answer_service,
     get_ticket_ai_analysis_repository,
     get_ticket_repository,
@@ -27,6 +28,12 @@ from app.schemas.ticket_ai_analysis import (
     TicketAnalysisCompletedResponse,
     TicketAnalysisPendingResponse,
 )
+from app.services.suggested_answer_delivery_service import (
+    SuggestedAnswerDeliveryFailedError,
+    SuggestedAnswerDeliveryService,
+    SuggestedAnswerNotSendableError,
+    SuggestedAnswerRecipientMissingError,
+)
 from app.services.suggested_answer_service import (
     SuggestedAnswerAlreadyReviewedError,
     SuggestedAnswerService,
@@ -41,6 +48,9 @@ TicketAIAnalysisRepositoryDependency = Annotated[
 ]
 SuggestedAnswerServiceDependency = Annotated[
     SuggestedAnswerService, Depends(get_suggested_answer_service)
+]
+SuggestedAnswerDeliveryDependency = Annotated[
+    SuggestedAnswerDeliveryService, Depends(get_suggested_answer_delivery_service)
 ]
 
 
@@ -199,6 +209,28 @@ async def reject_suggested_answer(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except SuggestedAnswerAlreadyReviewedError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    return SuggestedAnswerResponse.model_validate(draft)
+
+
+@router.post(
+    "/{ticket_id}/suggested-answers/{draft_id}/send",
+    response_model=SuggestedAnswerResponse,
+)
+async def send_suggested_answer(
+    ticket_id: UUID, draft_id: UUID, service: SuggestedAnswerDeliveryDependency
+) -> SuggestedAnswerResponse:
+    """Email an approved answer and return only after SMTP confirms acceptance."""
+
+    try:
+        draft = await service.send(ticket_id, draft_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except SuggestedAnswerNotSendableError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except SuggestedAnswerRecipientMissingError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SuggestedAnswerDeliveryFailedError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
     return SuggestedAnswerResponse.model_validate(draft)
 
 

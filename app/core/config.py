@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     rabbitmq_management_url: str = "http://localhost:15672"
     document_ingestion_queue: str = "document.ingestion"
     ticket_analysis_queue: str = "ticket.analysis"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_from_email: str = ""
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    smtp_timeout: float = 30.0
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 

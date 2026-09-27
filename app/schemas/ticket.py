@@ -98,16 +98,20 @@ class SuggestedAnswerResponse(BaseModel):
 
     draft_id: UUID = Field(validation_alias="id")
     ticket_id: UUID
-    status: Literal["draft", "approved", "rejected"]
+    status: Literal["draft", "approved", "rejected", "pending_send", "sent", "send_failed"]
     suggested_answer: str = Field(validation_alias="ai_content")
     staff_content: str | None
     created_at: datetime
     updated_at: datetime | None
     reviewed_at: datetime | None
     rejection_reason: str | None
+    recipient_email: str | None
+    send_started_at: datetime | None
+    sent_at: datetime | None
+    send_failure_reason: str | None
     sources: list[SuggestedAnswerSourceResponse]
 
-    @field_validator("created_at", "updated_at", "reviewed_at")
+    @field_validator("created_at", "updated_at", "reviewed_at", "send_started_at", "sent_at")
     @classmethod
     def assume_utc_for_naive_database_timestamp(cls, value: datetime | None) -> datetime | None:
         """SQLite test storage loses timezone information; timestamps are written as UTC."""

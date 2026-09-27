@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -18,6 +18,7 @@ from app.messaging.rabbitmq import (
     RabbitMQDocumentIngestionPublisher,
     RabbitMQTicketAnalysisPublisher,
 )
+from app.messaging.smtp import SMTPEmailSender
 from app.parsers.document import DocumentParser
 from app.parsers.pdf import PDFDocumentParser
 from app.repositories.document_chunk_repository import DocumentChunkRepository
@@ -30,9 +31,11 @@ from app.services.chunking_service import ChunkingService
 from app.services.document_ingestion_publisher import DocumentIngestionPublisher
 from app.services.document_ingestion_service import DocumentIngestionService
 from app.services.document_service import DocumentService
+from app.services.email_sender import EmailSender
 from app.services.embedding_service import EmbeddingService
 from app.services.rag_service import RAGService
 from app.services.retrieval_service import RetrievalService
+from app.services.suggested_answer_delivery_service import SuggestedAnswerDeliveryService
 from app.services.suggested_answer_service import SuggestedAnswerService
 from app.services.ticket_analysis_publisher import TicketAnalysisPublisher
 from app.services.ticket_analysis_service import TicketAnalysisService
@@ -212,6 +215,35 @@ def get_suggested_answer_service(
         RAGService(retrieval, DeferredLLMClient(get_llm_client)),
         TicketSuggestedAnswerRepository(session),
         session,
+    )
+
+
+def get_email_sender() -> EmailSender:
+    """Build SMTP transport only for the explicit send endpoint."""
+
+    settings = get_settings()
+    if not settings.smtp_host.strip() or not settings.smtp_from_email.strip():
+        raise HTTPException(status_code=503, detail="SMTP delivery is not configured")
+    return SMTPEmailSender(
+        host=settings.smtp_host,
+        port=settings.smtp_port,
+        from_email=settings.smtp_from_email,
+        username=settings.smtp_username,
+        password=settings.smtp_password,
+        starttls=settings.smtp_starttls,
+        timeout=settings.smtp_timeout,
+    )
+
+
+def get_suggested_answer_delivery_service(
+    session: DbSession,
+    tickets: Annotated[TicketRepository, Depends(get_ticket_repository)],
+    sender: Annotated[EmailSender, Depends(get_email_sender)],
+) -> SuggestedAnswerDeliveryService:
+    """Build the email delivery workflow for the current request."""
+
+    return SuggestedAnswerDeliveryService(
+        tickets, TicketSuggestedAnswerRepository(session), sender, session
     )
 
 

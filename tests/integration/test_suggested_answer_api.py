@@ -3,10 +3,15 @@
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
-from app.api.dependencies import get_retrieval_service, get_ticket_analysis_publisher
+from app.api.dependencies import (
+    get_email_sender,
+    get_retrieval_service,
+    get_ticket_analysis_publisher,
+)
 from app.main import app
 from app.repositories.document_chunk_repository import SimilarDocumentChunk
 from app.schemas.rag import RAGAnswer
+from app.services.email_sender import EmailDeliveryError
 from app.services.rag_service import RAGService
 
 
@@ -156,3 +161,81 @@ def test_rejected_draft_keeps_reason_and_cannot_be_approved(client) -> None:
     assert client.post(f"{url}/approve").status_code == 409
     assert client.post(f"{url}/reject", json={"reason": "Again"}).status_code == 409
     assert client.get(url).json() == rejected.json()
+
+
+def test_approved_answer_is_emailed_and_marked_sent_only_after_acceptance(client) -> None:
+    ticket_id = _create_ticket(client)
+    retrieval = AsyncMock()
+    retrieval.retrieve.return_value = []
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval
+    sender = AsyncMock()
+    app.dependency_overrides[get_email_sender] = lambda: sender
+
+    created = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+    draft_id = created.json()["draft_id"]
+    url = f"/api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}"
+    assert client.post(f"{url}/send").status_code == 409
+    client.patch(url, json={"staff_content": "Please verify your payment first."})
+    client.post(f"{url}/approve")
+
+    sent = client.post(f"{url}/send")
+
+    assert sent.status_code == 200
+    assert sent.json()["status"] == "sent"
+    assert sent.json()["recipient_email"] == "ada@example.com"
+    assert sent.json()["send_started_at"] is not None
+    assert sent.json()["sent_at"] is not None
+    assert sent.json()["send_failure_reason"] is None
+    sender.send.assert_awaited_once_with(
+        to_email="ada@example.com",
+        subject="Re: Can I get a refund?",
+        body="Please verify your payment first.",
+    )
+    assert client.get(url).json() == sent.json()
+    assert client.post(f"{url}/send").status_code == 409
+    sender.send.assert_awaited_once()
+
+
+def test_smtp_failure_is_recorded_without_marking_sent(client) -> None:
+    ticket_id = _create_ticket(client)
+    retrieval = AsyncMock()
+    retrieval.retrieve.return_value = []
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval
+    sender = AsyncMock()
+    sender.send.side_effect = EmailDeliveryError("SMTP rejected the recipient")
+    app.dependency_overrides[get_email_sender] = lambda: sender
+
+    created = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+    draft_id = created.json()["draft_id"]
+    url = f"/api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}"
+    assert client.post(f"{url}/approve").status_code == 200
+
+    failed = client.post(f"{url}/send")
+
+    assert failed.status_code == 502
+    saved = client.get(url).json()
+    assert saved["status"] == "send_failed"
+    assert saved["sent_at"] is None
+    assert saved["send_failure_reason"] == "SMTP rejected the recipient"
+    assert client.post(f"{url}/send").status_code == 409
+    sender.send.assert_awaited_once()
+
+
+def test_missing_customer_address_keeps_approved_draft_unsent(client) -> None:
+    ticket_id = _create_ticket(client)
+    retrieval = AsyncMock()
+    retrieval.retrieve.return_value = []
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval
+    sender = AsyncMock()
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    created = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+    url = f"/api/v1/tickets/{ticket_id}/suggested-answers/{created.json()['draft_id']}"
+    assert client.post(f"{url}/approve").status_code == 200
+    user_id = client.get(f"/api/v1/tickets/{ticket_id}").json()["user_id"]
+    assert client.delete(f"/api/v1/users/{user_id}").status_code == 204
+
+    response = client.post(f"{url}/send")
+
+    assert response.status_code == 422
+    assert client.get(url).json()["status"] == "approved"
+    sender.send.assert_not_awaited()

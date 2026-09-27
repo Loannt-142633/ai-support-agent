@@ -176,6 +176,20 @@ terminal: later edits or another decision return HTTP 409. Approval does not
 send a reply to the customer. There is no authenticated staff identity in the
 current API, so reviewer identity is not recorded yet.
 
+For email delivery, configure `SMTP_HOST`, `SMTP_FROM_EMAIL`, and optionally
+`SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_STARTTLS`, and
+`SMTP_TIMEOUT`. The adapter uses SMTP with STARTTLS by default (port 587).
+`POST /api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}/send` sends only
+an `approved` draft to the ticket customer's email address. It prefers
+`staff_content` over `ai_content`. The API commits `pending_send` before
+contacting SMTP and records `sent` only when SMTP accepts the message; a
+reported transport failure becomes `send_failed` and returns HTTP 502.
+`sent` means SMTP accepted the message, not that it reached the recipient's
+inbox. A send is not automatically retried: after a timeout or process crash,
+`pending_send` may need manual reconciliation because SMTP does not guarantee
+deduplication. Since staff authentication is intentionally deferred, the
+edit/approve/reject/send endpoints must not be exposed publicly in production.
+
 As with document uploads, a DB commit can succeed while publishing fails;
 the ticket then remains saved without a queued analysis job. This gap needs
 an outbox or equivalent reliability mechanism in a later step.

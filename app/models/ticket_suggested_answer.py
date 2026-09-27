@@ -27,14 +27,28 @@ class TicketSuggestedAnswer(Base):
     __tablename__ = "ticket_suggested_answers"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('draft', 'approved', 'rejected')",
+            "status IN ('draft', 'approved', 'rejected', 'pending_send', 'sent', 'send_failed')",
             name="ck_ticket_suggested_answers_status",
         ),
         CheckConstraint(
             "(status = 'draft' AND reviewed_at IS NULL AND rejection_reason IS NULL) OR "
-            "(status = 'approved' AND reviewed_at IS NOT NULL AND rejection_reason IS NULL) OR "
+            "(status IN ('approved', 'pending_send', 'sent', 'send_failed') "
+            "AND reviewed_at IS NOT NULL AND rejection_reason IS NULL) OR "
             "(status = 'rejected' AND reviewed_at IS NOT NULL AND rejection_reason IS NOT NULL)",
             name="ck_ticket_suggested_answers_review",
+        ),
+        CheckConstraint(
+            "(status IN ('draft', 'approved', 'rejected') AND recipient_email IS NULL "
+            "AND send_started_at IS NULL AND sent_at IS NULL AND send_failure_reason IS NULL) OR "
+            "(status = 'pending_send' AND recipient_email IS NOT NULL "
+            "AND send_started_at IS NOT NULL AND sent_at IS NULL "
+            "AND send_failure_reason IS NULL) OR "
+            "(status = 'sent' AND recipient_email IS NOT NULL AND send_started_at IS NOT NULL "
+            "AND sent_at IS NOT NULL AND send_failure_reason IS NULL) OR "
+            "(status = 'send_failed' AND recipient_email IS NOT NULL "
+            "AND send_started_at IS NOT NULL AND sent_at IS NULL "
+            "AND send_failure_reason IS NOT NULL)",
+            name="ck_ticket_suggested_answers_delivery",
         ),
     )
 
@@ -51,6 +65,10 @@ class TicketSuggestedAnswer(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    recipient_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    send_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    send_failure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     ticket: Mapped["Ticket"] = relationship(back_populates="suggested_answers")
     sources: Mapped[list["TicketSuggestedAnswerSource"]] = relationship(

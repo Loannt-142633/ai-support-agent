@@ -1,9 +1,11 @@
 """SQLAlchemy repository for tickets."""
 
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.ticket import Ticket, TicketCategory, TicketPriority, TicketStatus
 
@@ -37,6 +39,12 @@ class TicketRepository:
 
     async def get(self, ticket_id: UUID) -> Ticket | None:
         return await self._session.get(Ticket, ticket_id)
+
+    async def get_with_user(self, ticket_id: UUID) -> Ticket | None:
+        """Load the customer address without async lazy-loading."""
+
+        statement = select(Ticket).options(selectinload(Ticket.user)).where(Ticket.id == ticket_id)
+        return cast(Ticket | None, await self._session.scalar(statement))
 
     async def list(
         self,
