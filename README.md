@@ -108,7 +108,9 @@ inspected in the RabbitMQ management UI at http://localhost:15672. The failed
 message carries RabbitMQ's `x-death` header;
 the exception traceback remains in worker logs. The worker sets
 `prefetch_count=1`, so each consumer receives at most one unacknowledged job at
-a time.
+a time. Before parsing, the handler checks for existing chunks; a sequentially
+redelivered job is ACKed without parsing or embedding again. This does not
+prevent two workers from processing the same document concurrently.
 
 ## Run
 

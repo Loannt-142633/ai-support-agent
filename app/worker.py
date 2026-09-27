@@ -7,6 +7,7 @@ from pathlib import Path
 from types import FrameType
 
 import aio_pika
+from aio_pika.abc import AbstractIncomingMessage
 
 from app.api.dependencies import (
     get_chunking_service,
@@ -38,9 +39,21 @@ def create_consumer() -> RabbitMQDocumentIngestionConsumer:
 
 
 async def run_worker(stop_event: asyncio.Event) -> None:
-    """Consume ingestion jobs until stopped, then close RabbitMQ and the DB engine."""
+    """Cancel consumption and drain active jobs before closing dependencies."""
 
     settings = get_settings()
+    in_flight: set[asyncio.Task[None]] = set()
+
+    async def process_message(message: AbstractIncomingMessage) -> None:
+        task = asyncio.current_task()
+        if task is None:
+            raise RuntimeError("Document ingestion callback is not running in a task")
+        in_flight.add(task)
+        try:
+            await consumer.process_message(message)
+        finally:
+            in_flight.discard(task)
+
     try:
         consumer = create_consumer()
         connection = await aio_pika.connect_robust(settings.rabbitmq_url, timeout=5)
@@ -48,9 +61,26 @@ async def run_worker(stop_event: asyncio.Event) -> None:
             channel = await connection.channel()
             await channel.set_qos(prefetch_count=1)
             queue = await channel.declare_queue(settings.document_ingestion_queue, durable=True)
-            await queue.consume(consumer.process_message, no_ack=False)
+            consumer_tag = await queue.consume(process_message, no_ack=False)
             logger.info("Consuming document ingestion jobs from %s", queue.name)
-            await stop_event.wait()
+            try:
+                await stop_event.wait()
+            finally:
+                try:
+                    await queue.cancel(consumer_tag)
+                finally:
+                    # aio-pika schedules delivery and the callback in separate tasks.
+                    # Let pre-cancel deliveries enter the wrapper before checking the set.
+                    for _ in range(2):
+                        await asyncio.sleep(0)
+                    while in_flight:
+                        results = await asyncio.gather(*tuple(in_flight), return_exceptions=True)
+                        for result in results:
+                            if isinstance(result, BaseException):
+                                logger.error(
+                                    "In-flight document ingestion callback failed during shutdown",
+                                    exc_info=(type(result), result, result.__traceback__),
+                                )
     finally:
         await engine.dispose()
 

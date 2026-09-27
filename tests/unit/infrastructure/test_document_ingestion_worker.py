@@ -83,7 +83,189 @@ def test_worker_subscribes_until_stopped_then_closes_connection_and_db_engine() 
         channel.declare_queue.assert_awaited_once_with(
             settings.document_ingestion_queue, durable=True
         )
-        queue.consume.assert_awaited_once_with(consumer.process_message, no_ack=False)
+        queue.consume.assert_awaited_once()
+        assert callable(queue.consume.await_args.args[0])
+        assert queue.consume.await_args.kwargs == {"no_ack": False}
+        queue.cancel.assert_awaited_once_with("consumer-tag")
+        connection.__aexit__.assert_awaited_once()
+        fake_engine.dispose.assert_awaited_once_with()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("settlement", ["ack", "reject"])
+def test_worker_waits_for_active_callback_before_closing_dependencies(
+    settlement: str,
+) -> None:
+    settings = SimpleNamespace(
+        rabbitmq_url="amqp://app:app@localhost:5672/",
+        document_ingestion_queue="document.ingestion",
+    )
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    channel = AsyncMock()
+    connection.channel.return_value = channel
+    queue = AsyncMock()
+    queue.name = "document.ingestion"
+    channel.declare_queue.return_value = queue
+    consumer = MagicMock()
+    fake_engine = SimpleNamespace(dispose=AsyncMock())
+    message = MagicMock()
+    message.ack = AsyncMock()
+    message.reject = AsyncMock()
+    events: list[str] = []
+
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        subscribed = asyncio.Event()
+        processing = asyncio.Event()
+        cancelled = asyncio.Event()
+        release = asyncio.Event()
+
+        async def subscribe(*_args: object, **_kwargs: object) -> str:
+            subscribed.set()
+            return "consumer-tag"
+
+        async def cancel(consumer_tag: str) -> None:
+            assert consumer_tag == "consumer-tag"
+            events.append("cancel")
+            cancelled.set()
+
+        async def process_message(_message: object) -> None:
+            processing.set()
+            await release.wait()
+            if settlement == "ack":
+                await message.ack()
+            else:
+                await message.reject(requeue=False)
+
+        async def settle(*_args: object, **_kwargs: object) -> None:
+            events.append(settlement)
+
+        async def close_connection(*_args: object) -> None:
+            events.append("connection_closed")
+
+        async def dispose_engine() -> None:
+            events.append("engine_disposed")
+
+        queue.consume.side_effect = subscribe
+        queue.cancel.side_effect = cancel
+        consumer.process_message = AsyncMock(side_effect=process_message)
+        message.ack.side_effect = settle
+        message.reject.side_effect = settle
+        connection.__aexit__.side_effect = close_connection
+        fake_engine.dispose.side_effect = dispose_engine
+
+        with (
+            patch("app.worker.get_settings", return_value=settings),
+            patch("app.worker.create_consumer", return_value=consumer),
+            patch("app.worker.aio_pika.connect_robust", new_callable=AsyncMock) as connect,
+            patch("app.worker.engine", new=fake_engine),
+        ):
+            connect.return_value = connection
+            worker_task = asyncio.create_task(run_worker(stop_event))
+            await asyncio.wait_for(subscribed.wait(), timeout=1)
+            callback = queue.consume.await_args.args[0]
+            callback_task = asyncio.create_task(callback(message))
+            await asyncio.wait_for(processing.wait(), timeout=1)
+
+            stop_event.set()
+            await asyncio.wait_for(cancelled.wait(), timeout=1)
+            try:
+                assert not worker_task.done()
+                connection.__aexit__.assert_not_awaited()
+                fake_engine.dispose.assert_not_awaited()
+                message.ack.assert_not_awaited()
+                message.reject.assert_not_awaited()
+            finally:
+                release.set()
+
+            await asyncio.wait_for(callback_task, timeout=1)
+            await asyncio.wait_for(worker_task, timeout=1)
+
+        queue.cancel.assert_awaited_once_with("consumer-tag")
+        consumer.process_message.assert_awaited_once_with(message)
+        if settlement == "ack":
+            message.ack.assert_awaited_once_with()
+            message.reject.assert_not_awaited()
+        else:
+            message.ack.assert_not_awaited()
+            message.reject.assert_awaited_once_with(requeue=False)
+        assert events == ["cancel", settlement, "connection_closed", "engine_disposed"]
+
+    asyncio.run(scenario())
+
+
+def test_worker_drains_delivery_scheduled_just_before_cancel_completes() -> None:
+    settings = SimpleNamespace(
+        rabbitmq_url="amqp://app:app@localhost:5672/",
+        document_ingestion_queue="document.ingestion",
+    )
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    channel = AsyncMock()
+    connection.channel.return_value = channel
+    queue = AsyncMock()
+    queue.name = "document.ingestion"
+    channel.declare_queue.return_value = queue
+    consumer = MagicMock()
+    fake_engine = SimpleNamespace(dispose=AsyncMock())
+    message = MagicMock()
+    message.ack = AsyncMock()
+
+    async def scenario() -> None:
+        stop_event = asyncio.Event()
+        subscribed = asyncio.Event()
+        processing = asyncio.Event()
+        release = asyncio.Event()
+        delivery_task: asyncio.Task[None] | None = None
+
+        async def subscribe(*_args: object, **_kwargs: object) -> str:
+            subscribed.set()
+            return "consumer-tag"
+
+        async def process_message(_message: object) -> None:
+            processing.set()
+            await release.wait()
+            await message.ack()
+
+        async def dispatch() -> None:
+            callback = queue.consume.await_args.args[0]
+            await asyncio.create_task(callback(message))
+
+        async def cancel(consumer_tag: str) -> None:
+            nonlocal delivery_task
+            assert consumer_tag == "consumer-tag"
+            delivery_task = asyncio.create_task(dispatch())
+
+        queue.consume.side_effect = subscribe
+        queue.cancel.side_effect = cancel
+        consumer.process_message = AsyncMock(side_effect=process_message)
+
+        with (
+            patch("app.worker.get_settings", return_value=settings),
+            patch("app.worker.create_consumer", return_value=consumer),
+            patch("app.worker.aio_pika.connect_robust", new_callable=AsyncMock) as connect,
+            patch("app.worker.engine", new=fake_engine),
+        ):
+            connect.return_value = connection
+            worker_task = asyncio.create_task(run_worker(stop_event))
+            await asyncio.wait_for(subscribed.wait(), timeout=1)
+            stop_event.set()
+            await asyncio.wait_for(processing.wait(), timeout=1)
+            try:
+                assert not worker_task.done()
+                connection.__aexit__.assert_not_awaited()
+                fake_engine.dispose.assert_not_awaited()
+            finally:
+                release.set()
+
+            assert delivery_task is not None
+            await asyncio.wait_for(delivery_task, timeout=1)
+            await asyncio.wait_for(worker_task, timeout=1)
+
+        message.ack.assert_awaited_once_with()
+        queue.cancel.assert_awaited_once_with("consumer-tag")
         connection.__aexit__.assert_awaited_once()
         fake_engine.dispose.assert_awaited_once_with()
 
