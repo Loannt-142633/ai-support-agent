@@ -75,6 +75,7 @@ services:
     build:
       context: .
       target: worker
+    stop_grace_period: 30m
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@db:5432/ai_support_agent

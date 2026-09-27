@@ -196,7 +196,10 @@ def test_worker_waits_for_active_callback_before_closing_dependencies(
     asyncio.run(scenario())
 
 
-def test_worker_drains_delivery_scheduled_just_before_cancel_completes() -> None:
+@pytest.mark.parametrize("delivery_timing", ["during_cancel", "after_close"])
+def test_worker_does_not_start_late_delivery_during_shutdown(
+    delivery_timing: str,
+) -> None:
     settings = SimpleNamespace(
         rabbitmq_url="amqp://app:app@localhost:5672/",
         document_ingestion_queue="document.ingestion",
@@ -211,36 +214,36 @@ def test_worker_drains_delivery_scheduled_just_before_cancel_completes() -> None
     consumer = MagicMock()
     fake_engine = SimpleNamespace(dispose=AsyncMock())
     message = MagicMock()
+    message.message_id = "late-message"
     message.ack = AsyncMock()
+    message.reject = AsyncMock()
 
     async def scenario() -> None:
         stop_event = asyncio.Event()
         subscribed = asyncio.Event()
-        processing = asyncio.Event()
-        release = asyncio.Event()
+        allow_delivery = asyncio.Event()
         delivery_task: asyncio.Task[None] | None = None
 
         async def subscribe(*_args: object, **_kwargs: object) -> str:
             subscribed.set()
             return "consumer-tag"
 
-        async def process_message(_message: object) -> None:
-            processing.set()
-            await release.wait()
-            await message.ack()
-
         async def dispatch() -> None:
+            await allow_delivery.wait()
             callback = queue.consume.await_args.args[0]
-            await asyncio.create_task(callback(message))
+            await callback(message)
 
         async def cancel(consumer_tag: str) -> None:
             nonlocal delivery_task
             assert consumer_tag == "consumer-tag"
             delivery_task = asyncio.create_task(dispatch())
+            if delivery_timing == "during_cancel":
+                allow_delivery.set()
+                await delivery_task
 
         queue.consume.side_effect = subscribe
         queue.cancel.side_effect = cancel
-        consumer.process_message = AsyncMock(side_effect=process_message)
+        consumer.process_message = AsyncMock()
 
         with (
             patch("app.worker.get_settings", return_value=settings),
@@ -252,19 +255,14 @@ def test_worker_drains_delivery_scheduled_just_before_cancel_completes() -> None
             worker_task = asyncio.create_task(run_worker(stop_event))
             await asyncio.wait_for(subscribed.wait(), timeout=1)
             stop_event.set()
-            await asyncio.wait_for(processing.wait(), timeout=1)
-            try:
-                assert not worker_task.done()
-                connection.__aexit__.assert_not_awaited()
-                fake_engine.dispose.assert_not_awaited()
-            finally:
-                release.set()
-
-            assert delivery_task is not None
-            await asyncio.wait_for(delivery_task, timeout=1)
             await asyncio.wait_for(worker_task, timeout=1)
+            assert delivery_task is not None
+            allow_delivery.set()
+            await asyncio.wait_for(delivery_task, timeout=1)
 
-        message.ack.assert_awaited_once_with()
+        consumer.process_message.assert_not_awaited()
+        message.ack.assert_not_awaited()
+        message.reject.assert_not_awaited()
         queue.cancel.assert_awaited_once_with("consumer-tag")
         connection.__aexit__.assert_awaited_once()
         fake_engine.dispose.assert_awaited_once_with()

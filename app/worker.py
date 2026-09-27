@@ -43,11 +43,19 @@ async def run_worker(stop_event: asyncio.Event) -> None:
 
     settings = get_settings()
     in_flight: set[asyncio.Task[None]] = set()
+    stopping = False
 
     async def process_message(message: AbstractIncomingMessage) -> None:
+        if stopping:
+            # It was delivered before cancel-ok but has not started processing.
+            # Leave it unacknowledged so the broker requeues it on connection close.
+            logger.info("Deferring ingestion message %s during shutdown", message.message_id)
+            return
         task = asyncio.current_task()
         if task is None:
             raise RuntimeError("Document ingestion callback is not running in a task")
+        # No await between the stopping check and registration: a handler
+        # cannot start without being visible to the shutdown drain.
         in_flight.add(task)
         try:
             await consumer.process_message(message)
@@ -66,13 +74,10 @@ async def run_worker(stop_event: asyncio.Event) -> None:
             try:
                 await stop_event.wait()
             finally:
+                stopping = True
                 try:
                     await queue.cancel(consumer_tag)
                 finally:
-                    # aio-pika schedules delivery and the callback in separate tasks.
-                    # Let pre-cancel deliveries enter the wrapper before checking the set.
-                    for _ in range(2):
-                        await asyncio.sleep(0)
                     while in_flight:
                         results = await asyncio.gather(*tuple(in_flight), return_exceptions=True)
                         for result in results:
