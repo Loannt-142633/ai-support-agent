@@ -14,6 +14,7 @@ from app.llm.exceptions import LLMInvalidResponseError
 from app.messaging.rabbitmq import RabbitMQTicketAnalysisConsumer
 from app.models.ticket import Ticket, TicketCategory, TicketPriority
 from app.models.ticket_ai_analysis import TicketAIAnalysis
+from app.repositories.ticket_ai_analysis_repository import TicketAIAnalysisRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
 from app.services.ticket_analysis_service import TicketAnalysisService
@@ -80,9 +81,7 @@ async def _run_analysis_and_redelivery() -> None:
                 .select_from(TicketAIAnalysis)
                 .where(TicketAIAnalysis.ticket_id == ticket_id)
             )
-            record = await session.scalar(
-                select(TicketAIAnalysis).where(TicketAIAnalysis.ticket_id == ticket_id)
-            )
+            record = await TicketAIAnalysisRepository(session).get_by_ticket_id(ticket_id)
         assert count == 1
         assert record is not None
         assert record.predicted_category is TicketCategory.BILLING
@@ -122,11 +121,14 @@ async def _run_analysis_and_redelivery() -> None:
         failing_message.ack.assert_not_awaited()
         failing_message.reject.assert_awaited_once_with(requeue=False)
         async with SessionLocal() as session:
-            assert await session.scalar(
-                select(func.count())
-                .select_from(TicketAIAnalysis)
-                .where(TicketAIAnalysis.ticket_id == failing_ticket_id)
-            ) == 0
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(TicketAIAnalysis)
+                    .where(TicketAIAnalysis.ticket_id == failing_ticket_id)
+                )
+                == 0
+            )
 
         with pytest.raises(TicketNotFoundError):
             await handler.handle(uuid4())

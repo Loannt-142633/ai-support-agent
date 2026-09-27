@@ -139,6 +139,14 @@ temporary DB, LLM timeout, and rate-limit failures up to three attempts, and
 rejects terminal failures to `ticket.analysis.failed`. The existing-analysis
 check prevents sequential duplicates; concurrent workers processing the same
 ticket are not yet protected against duplicate records.
+`GET /api/v1/tickets/{ticket_id}/analysis` returns `{"status":"pending"}`
+while no analysis record exists, or `{"status":"completed", "category": ...,
+"priority": ..., "summary": ..., "requires_human": ...}` once one is saved.
+The response also includes `ticket_id`; an unknown ticket returns 404. Both
+states use HTTP 200 because this is a read endpoint. `pending` means only
+"no result in DB yet": the API cannot currently distinguish a running job
+from a job lost between commit and publish or rejected to the failed queue.
+
 As with document uploads, a DB commit can succeed while publishing fails;
 the ticket then remains saved without a queued analysis job. This gap needs
 an outbox or equivalent reliability mechanism in a later step.

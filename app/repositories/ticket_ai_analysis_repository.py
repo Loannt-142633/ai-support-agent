@@ -1,5 +1,6 @@
 """Persistence operations for AI-generated ticket analysis."""
 
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,6 +21,17 @@ class TicketAIAnalysisRepository:
             select(TicketAIAnalysis.id).where(TicketAIAnalysis.ticket_id == ticket_id).limit(1)
         )
         return await self._session.scalar(statement) is not None
+
+    async def get_by_ticket_id(self, ticket_id: UUID) -> TicketAIAnalysis | None:
+        """Return the most recent persisted analysis for a ticket."""
+
+        statement = (
+            select(TicketAIAnalysis)
+            .where(TicketAIAnalysis.ticket_id == ticket_id)
+            .order_by(TicketAIAnalysis.created_at.desc(), TicketAIAnalysis.id.desc())
+            .limit(1)
+        )
+        return cast(TicketAIAnalysis | None, await self._session.scalar(statement))
 
     async def create(
         self,

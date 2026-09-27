@@ -21,6 +21,7 @@ from app.parsers.document import DocumentParser
 from app.parsers.pdf import PDFDocumentParser
 from app.repositories.document_chunk_repository import DocumentChunkRepository
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.ticket_ai_analysis_repository import TicketAIAnalysisRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
 from app.services.chunking_service import ChunkingService
@@ -124,6 +125,18 @@ def get_ticket_service(
     """Build a ticket service for the current request."""
 
     return TicketService(TicketRepository(session), UserRepository(session), session, publisher)
+
+
+def get_ticket_repository(session: DbSession) -> TicketRepository:
+    """Build the ticket repository for read-only lookups."""
+
+    return TicketRepository(session)
+
+
+def get_ticket_ai_analysis_repository(session: DbSession) -> TicketAIAnalysisRepository:
+    """Build the analysis repository for read-only lookups."""
+
+    return TicketAIAnalysisRepository(session)
 
 
 def get_document_ingestion_publisher() -> DocumentIngestionPublisher:
