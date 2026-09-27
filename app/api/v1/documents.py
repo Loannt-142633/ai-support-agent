@@ -1,15 +1,19 @@
 """Document HTTP endpoints."""
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
-from app.api.dependencies import get_document_service
-from app.schemas.document import DocumentResponse
+from app.api.dependencies import get_document_repository, get_document_service
+from app.models.document import DocumentStatus
+from app.repositories.document_repository import DocumentRepository
+from app.schemas.document import DocumentResponse, DocumentStatusResponse
 from app.services.document_service import DocumentService, InvalidDocumentError
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 DocumentServiceDependency = Annotated[DocumentService, Depends(get_document_service)]
+DocumentRepositoryDependency = Annotated[DocumentRepository, Depends(get_document_repository)]
 
 
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
@@ -34,3 +38,20 @@ async def upload_document(
         ) from error
     finally:
         await file.close()
+
+
+@router.get("/{document_id}/status", response_model=DocumentStatusResponse)
+async def get_document_status(
+    document_id: UUID,
+    repository: DocumentRepositoryDependency,
+) -> DocumentStatusResponse:
+    """Return the persisted ingestion state for one document."""
+
+    document = await repository.get_by_id(document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    return DocumentStatusResponse(
+        document_id=document.id,
+        status=DocumentStatus(document.status),
+        failure_reason=document.failure_reason,
+    )

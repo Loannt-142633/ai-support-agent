@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from app.jobs.document_ingestion_handler import DocumentNotFoundError
 from app.messaging.rabbitmq import RabbitMQDocumentIngestionConsumer
+from app.models.document import DocumentStatus
 from app.parsers.document import DocumentParseError
 from app.services.document_ingestion_service import NoExtractableTextError
 from pypdf.errors import PdfReadError
@@ -107,11 +108,15 @@ def test_process_message_rejects_handler_error_for_dead_lettering(
     message = make_message(json.dumps({"document_id": str(document_id)}).encode())
     handler = MagicMock()
     handler.handle = AsyncMock(side_effect=RuntimeError("ingestion failed"))
+    handler.mark_failed = AsyncMock(return_value=DocumentStatus.FAILED)
 
     with caplog.at_level(logging.ERROR):
         asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
 
     handler.handle.assert_awaited_once_with(document_id)
+    handler.mark_failed.assert_awaited_once_with(
+        document_id, "Document ingestion failed (RuntimeError)"
+    )
     assert f"Failed to ingest document {document_id} from message message-1" in caplog.text
     message.ack.assert_not_awaited()
     message.nack.assert_not_awaited()
@@ -165,12 +170,14 @@ def test_process_message_rejects_after_three_db_checkout_failures(
     message = make_message(json.dumps({"document_id": str(document_id)}).encode())
     handler = MagicMock()
     handler.handle = AsyncMock(side_effect=SQLAlchemyTimeoutError("DB pool exhausted"))
+    handler.mark_failed = AsyncMock(return_value=DocumentStatus.FAILED)
 
     async def sleep(seconds: int) -> None:
         assert seconds == 3
         message.ack.assert_not_awaited()
         message.reject.assert_not_awaited()
         message.nack.assert_not_awaited()
+        handler.mark_failed.assert_not_awaited()
 
     with (
         caplog.at_level(logging.ERROR),
@@ -182,6 +189,9 @@ def test_process_message_rejects_after_three_db_checkout_failures(
 
     assert handler.handle.await_count == 3
     assert sleep_mock.await_count == 2
+    handler.mark_failed.assert_awaited_once_with(
+        document_id, "Temporary infrastructure failure after 3 attempts"
+    )
     message.ack.assert_not_awaited()
     message.nack.assert_not_awaited()
     message.reject.assert_awaited_once_with(requeue=False)
@@ -238,14 +248,50 @@ def test_process_message_rejects_non_connection_failures_without_retry(
     message = make_message(json.dumps({"document_id": str(document_id)}).encode())
     handler = MagicMock()
     handler.handle = AsyncMock(side_effect=error)
+    handler.mark_failed = AsyncMock(return_value=DocumentStatus.FAILED)
 
     with patch("app.messaging.rabbitmq.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
         asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
 
     handler.handle.assert_awaited_once_with(document_id)
+    assert handler.mark_failed.await_count == 1
+    assert handler.mark_failed.await_args.args[0] == document_id
+    assert len(handler.mark_failed.await_args.args[1]) <= 255
     sleep_mock.assert_not_awaited()
     message.ack.assert_not_awaited()
     message.nack.assert_not_awaited()
+    message.reject.assert_awaited_once_with(requeue=False)
+
+
+def test_process_message_acks_if_failed_attempt_already_persisted_chunks() -> None:
+    document_id = uuid4()
+    message = make_message(json.dumps({"document_id": str(document_id)}).encode())
+    handler = MagicMock()
+    handler.handle = AsyncMock(side_effect=RuntimeError("commit reply lost"))
+    handler.mark_failed = AsyncMock(return_value=DocumentStatus.COMPLETED)
+
+    asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
+
+    handler.mark_failed.assert_awaited_once()
+    message.ack.assert_awaited_once_with()
+    message.reject.assert_not_awaited()
+
+
+def test_process_message_rejects_when_failed_status_cannot_be_persisted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    document_id = uuid4()
+    message = make_message(json.dumps({"document_id": str(document_id)}).encode())
+    handler = MagicMock()
+    handler.handle = AsyncMock(side_effect=RuntimeError("ingestion failed"))
+    handler.mark_failed = AsyncMock(side_effect=SQLAlchemyTimeoutError("DB unavailable"))
+
+    with caplog.at_level(logging.ERROR):
+        asyncio.run(RabbitMQDocumentIngestionConsumer(handler).process_message(message))
+
+    assert "Could not persist failed status" in caplog.text
+    handler.mark_failed.assert_awaited_once()
+    message.ack.assert_not_awaited()
     message.reject.assert_awaited_once_with(requeue=False)
 
 

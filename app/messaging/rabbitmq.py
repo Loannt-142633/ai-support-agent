@@ -15,12 +15,26 @@ from app.jobs.document_ingestion_handler import (
     DocumentIngestionJobHandler,
     DocumentNotFoundError,
 )
+from app.models.document import DocumentStatus
 from app.parsers.document import DocumentParseError
+from app.services.document_ingestion_service import NoExtractableTextError
 
 logger = logging.getLogger(__name__)
 _MAX_HANDLER_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 3
 _RETRYABLE_SQLSTATES = {"53300", "57P01", "57P02", "57P03"}
+
+
+def _failure_reason(error: Exception) -> str:
+    """Return a short, non-sensitive reason for the status API."""
+
+    if isinstance(error, NoExtractableTextError):
+        return "Document has no extractable text"
+    if _is_retryable_error(error):
+        return "Temporary infrastructure failure after 3 attempts"
+    if isinstance(error, DocumentParseError):
+        return "PDF could not be parsed"
+    return f"Document ingestion failed ({type(error).__name__})"[:255]
 
 
 def _is_retryable_error(error: Exception) -> bool:
@@ -130,6 +144,24 @@ class RabbitMQDocumentIngestionConsumer:
                     message.message_id,
                     attempt,
                 )
+                try:
+                    final_status = await self._handler.mark_failed(
+                        document_id, _failure_reason(error)
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not persist failed status for document %s from message %s",
+                        document_id,
+                        message.message_id,
+                    )
+                else:
+                    if final_status == DocumentStatus.COMPLETED:
+                        logger.info(
+                            "Document %s already has chunks; acknowledging message %s",
+                            document_id,
+                            message.message_id,
+                        )
+                        break
                 await message.reject(requeue=False)
                 return
             else:

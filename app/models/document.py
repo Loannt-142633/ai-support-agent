@@ -1,10 +1,11 @@
 """ORM model for uploaded policy documents."""
 
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -14,10 +15,23 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
+class DocumentStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class Document(Base):
     """A store policy document and its embedding configuration."""
 
     __tablename__ = "documents"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'completed', 'failed')",
+            name="ck_documents_status",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -31,6 +45,13 @@ class Document(Base):
     )
     embedding_model: Mapped[str] = mapped_column(String(255), nullable=False)
     embedding_dimension: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=DocumentStatus.PENDING.value,
+        server_default=DocumentStatus.PENDING.value,
+    )
+    failure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     uploader: Mapped["User | None"] = relationship()
     chunks: Mapped[list["DocumentChunk"]] = relationship(

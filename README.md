@@ -112,6 +112,17 @@ a time. Before parsing, the handler checks for existing chunks; a sequentially
 redelivered job is ACKed without parsing or embedding again. This does not
 prevent two workers from processing the same document concurrently.
 
+An uploaded document starts as `pending`. The worker commits `processing`
+before parsing and embedding, then commits `completed` after the chunks are
+stored. On a terminal failure it records `failed` with a short reason and
+rejects the message to the failed queue. Query
+`GET /api/v1/documents/{document_id}/status` to see `document_id`, `status`,
+and `failure_reason` (`null` unless failed). Unknown IDs return 404. If a
+worker stops after committing `processing`, a redelivered job may run again;
+existing chunks are recognized as completed so they are not duplicated. If
+the DB is unavailable when recording failure, the message is still rejected
+to the failed queue and the status may remain `processing` until replayed.
+
 ## Run
 
 The Docker command is `docker compose up --build -d`. For local Python

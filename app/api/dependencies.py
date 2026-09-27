@@ -138,6 +138,12 @@ def get_document_service(
     )
 
 
+def get_document_repository(session: DbSession) -> DocumentRepository:
+    """Build the document repository for status lookups."""
+
+    return DocumentRepository(session)
+
+
 def get_llm_client() -> LLMClient:
     """Build the configured LLM provider client."""
 

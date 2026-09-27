@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.models.document import DocumentStatus
 from app.parsers.document import DocumentParser
 from app.repositories.document_chunk_repository import DocumentChunkRepository
 from app.repositories.document_repository import DocumentRepository
@@ -48,7 +49,17 @@ class DocumentIngestionJobHandler:
 
             chunks = DocumentChunkRepository(session)
             if await chunks.has_chunks(document_id):
+                if document.status != DocumentStatus.COMPLETED or document.failure_reason:
+                    document.status = DocumentStatus.COMPLETED.value
+                    document.failure_reason = None
+                    await session.commit()
                 return
+
+            # Commit before the slow parse/embed work so a crash leaves a visible
+            # processing state. A redelivery may process this state again.
+            document.status = DocumentStatus.PROCESSING.value
+            document.failure_reason = None
+            await session.commit()
 
             ingestion = DocumentIngestionService(
                 self._storage,
@@ -59,3 +70,23 @@ class DocumentIngestionJobHandler:
                 session,
             )
             await ingestion.ingest(document)
+            document.status = DocumentStatus.COMPLETED.value
+            document.failure_reason = None
+            await session.commit()
+
+    async def mark_failed(self, document_id: UUID, reason: str) -> DocumentStatus:
+        """Persist failure, or reconcile a committed ingestion as completed."""
+
+        async with self._session_factory() as session:
+            document = await DocumentRepository(session).get_by_id(document_id)
+            if document is None:
+                raise DocumentNotFoundError(document_id)
+
+            if await DocumentChunkRepository(session).has_chunks(document_id):
+                document.status = DocumentStatus.COMPLETED.value
+                document.failure_reason = None
+            else:
+                document.status = DocumentStatus.FAILED.value
+                document.failure_reason = reason[:255]
+            await session.commit()
+            return DocumentStatus(document.status)
