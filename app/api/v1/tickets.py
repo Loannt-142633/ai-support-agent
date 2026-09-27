@@ -15,6 +15,8 @@ from app.models.ticket import TicketCategory, TicketPriority, TicketStatus
 from app.repositories.ticket_ai_analysis_repository import TicketAIAnalysisRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.schemas.ticket import (
+    SuggestedAnswerEdit,
+    SuggestedAnswerReject,
     SuggestedAnswerResponse,
     TicketCreate,
     TicketListResponse,
@@ -25,7 +27,10 @@ from app.schemas.ticket_ai_analysis import (
     TicketAnalysisCompletedResponse,
     TicketAnalysisPendingResponse,
 )
-from app.services.suggested_answer_service import SuggestedAnswerService
+from app.services.suggested_answer_service import (
+    SuggestedAnswerAlreadyReviewedError,
+    SuggestedAnswerService,
+)
 from app.services.ticket_service import TicketService
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -135,6 +140,65 @@ async def get_suggested_answer(
         draft = await service.get(ticket_id, draft_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    return SuggestedAnswerResponse.model_validate(draft)
+
+
+@router.patch(
+    "/{ticket_id}/suggested-answers/{draft_id}", response_model=SuggestedAnswerResponse
+)
+async def edit_suggested_answer(
+    ticket_id: UUID,
+    draft_id: UUID,
+    payload: SuggestedAnswerEdit,
+    service: SuggestedAnswerServiceDependency,
+) -> SuggestedAnswerResponse:
+    """Save staff edits without changing the draft's review status."""
+
+    try:
+        draft = await service.edit(ticket_id, draft_id, payload.staff_content)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except SuggestedAnswerAlreadyReviewedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return SuggestedAnswerResponse.model_validate(draft)
+
+
+@router.post(
+    "/{ticket_id}/suggested-answers/{draft_id}/approve",
+    response_model=SuggestedAnswerResponse,
+)
+async def approve_suggested_answer(
+    ticket_id: UUID, draft_id: UUID, service: SuggestedAnswerServiceDependency
+) -> SuggestedAnswerResponse:
+    """Approve a draft once; this does not send it to the customer."""
+
+    try:
+        draft = await service.approve(ticket_id, draft_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except SuggestedAnswerAlreadyReviewedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return SuggestedAnswerResponse.model_validate(draft)
+
+
+@router.post(
+    "/{ticket_id}/suggested-answers/{draft_id}/reject",
+    response_model=SuggestedAnswerResponse,
+)
+async def reject_suggested_answer(
+    ticket_id: UUID,
+    draft_id: UUID,
+    payload: SuggestedAnswerReject,
+    service: SuggestedAnswerServiceDependency,
+) -> SuggestedAnswerResponse:
+    """Reject a draft once, recording a reason for staff review."""
+
+    try:
+        draft = await service.reject(ticket_id, draft_id, payload.reason)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except SuggestedAnswerAlreadyReviewedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return SuggestedAnswerResponse.model_validate(draft)
 
 

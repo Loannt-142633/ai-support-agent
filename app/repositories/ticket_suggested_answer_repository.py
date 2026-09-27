@@ -45,3 +45,19 @@ class TicketSuggestedAnswerRepository:
             )
         )
         return cast(TicketSuggestedAnswer | None, await self._session.scalar(statement))
+
+    async def get_for_ticket_for_update(
+        self, *, ticket_id: UUID, draft_id: UUID
+    ) -> TicketSuggestedAnswer | None:
+        """Lock the draft until the edit/review transaction commits."""
+
+        statement = (
+            select(TicketSuggestedAnswer)
+            .options(selectinload(TicketSuggestedAnswer.sources))
+            .where(
+                TicketSuggestedAnswer.id == draft_id,
+                TicketSuggestedAnswer.ticket_id == ticket_id,
+            )
+            .with_for_update(of=TicketSuggestedAnswer)
+        )
+        return cast(TicketSuggestedAnswer | None, await self._session.scalar(statement))

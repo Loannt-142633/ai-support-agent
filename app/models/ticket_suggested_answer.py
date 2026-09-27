@@ -26,7 +26,16 @@ class TicketSuggestedAnswer(Base):
 
     __tablename__ = "ticket_suggested_answers"
     __table_args__ = (
-        CheckConstraint("status = 'draft'", name="ck_ticket_suggested_answers_status"),
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'rejected')",
+            name="ck_ticket_suggested_answers_status",
+        ),
+        CheckConstraint(
+            "(status = 'draft' AND reviewed_at IS NULL AND rejection_reason IS NULL) OR "
+            "(status = 'approved' AND reviewed_at IS NOT NULL AND rejection_reason IS NULL) OR "
+            "(status = 'rejected' AND reviewed_at IS NOT NULL AND rejection_reason IS NOT NULL)",
+            name="ck_ticket_suggested_answers_review",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -34,10 +43,14 @@ class TicketSuggestedAnswer(Base):
         ForeignKey("tickets.id", ondelete="CASCADE"), index=True, nullable=False
     )
     ai_content: Mapped[str] = mapped_column(Text, nullable=False)
+    staff_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     ticket: Mapped["Ticket"] = relationship(back_populates="suggested_answers")
     sources: Mapped[list["TicketSuggestedAnswerSource"]] = relationship(

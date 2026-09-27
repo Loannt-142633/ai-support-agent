@@ -166,6 +166,16 @@ returns 404. No reply is sent to the customer. If retrieval finds no suitable
 chunks, the insufficient-information answer is saved with no sources. An
 unknown ticket returns 404.
 
+Staff can save a revision with
+`PATCH /api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}` and body
+`{"staff_content": "..."}`. This preserves the original `ai_content` and
+leaves the status as `draft`. `POST .../{draft_id}/approve` approves the draft;
+`POST .../{draft_id}/reject` requires `{"reason": "..."}`. Review time and,
+for rejection, the reason are stored on the same draft. Both decisions are
+terminal: later edits or another decision return HTTP 409. Approval does not
+send a reply to the customer. There is no authenticated staff identity in the
+current API, so reviewer identity is not recorded yet.
+
 As with document uploads, a DB commit can succeed while publishing fails;
 the ticket then remains saved without a queued analysis job. This gap needs
 an outbox or equivalent reliability mechanism in a later step.

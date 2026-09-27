@@ -63,21 +63,53 @@ class SuggestedAnswerSourceResponse(BaseModel):
     chunk_index: int
 
 
+class SuggestedAnswerEdit(BaseModel):
+    """Save a staff revision while the suggested answer remains a draft."""
+
+    staff_content: str = Field(min_length=1)
+
+    @field_validator("staff_content")
+    @classmethod
+    def normalize_staff_content(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("staff_content must not be blank")
+        return normalized
+
+
+class SuggestedAnswerReject(BaseModel):
+    """Record why a staff member rejected a suggested answer."""
+
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("reason must not be blank")
+        return normalized
+
+
 class SuggestedAnswerResponse(BaseModel):
-    """A persisted review-only draft; no customer-facing action has been performed."""
+    """A persisted, unsent suggestion and its staff review state."""
 
     model_config = ConfigDict(from_attributes=True)
 
     draft_id: UUID = Field(validation_alias="id")
     ticket_id: UUID
-    status: Literal["draft"]
+    status: Literal["draft", "approved", "rejected"]
     suggested_answer: str = Field(validation_alias="ai_content")
+    staff_content: str | None
     created_at: datetime
+    updated_at: datetime | None
+    reviewed_at: datetime | None
+    rejection_reason: str | None
     sources: list[SuggestedAnswerSourceResponse]
 
-    @field_validator("created_at")
+    @field_validator("created_at", "updated_at", "reviewed_at")
     @classmethod
-    def assume_utc_for_naive_database_timestamp(cls, value: datetime) -> datetime:
+    def assume_utc_for_naive_database_timestamp(cls, value: datetime | None) -> datetime | None:
         """SQLite test storage loses timezone information; timestamps are written as UTC."""
 
-        return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+        return value.replace(tzinfo=UTC) if value is not None and value.tzinfo is None else value

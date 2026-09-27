@@ -47,6 +47,10 @@ def test_suggested_answer_persists_sources_and_get_does_not_regenerate(client) -
         draft_id = UUID(body["draft_id"])
         assert body["ticket_id"] == str(ticket_id)
         assert body["status"] == "draft"
+        assert body["staff_content"] is None
+        assert body["updated_at"] is None
+        assert body["reviewed_at"] is None
+        assert body["rejection_reason"] is None
         assert body["suggested_answer"] == (
             "Eligibility must be verified; manager approval is required."
         )
@@ -101,3 +105,54 @@ def test_suggested_answer_for_unknown_ticket_returns_404_without_llm(client) -> 
     assert response.status_code == 404
     assert response.json() == {"detail": "Ticket not found"}
     retrieval.retrieve.assert_not_awaited()
+
+
+def test_staff_can_edit_then_approve_only_once(client) -> None:
+    ticket_id = _create_ticket(client)
+    retrieval = AsyncMock()
+    retrieval.retrieve.return_value = []
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval
+    created = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+    assert created.status_code == 200
+    draft_id = created.json()["draft_id"]
+    url = f"/api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}"
+
+    edited = client.patch(url, json={"staff_content": "  Please verify your payment.  "})
+    assert edited.status_code == 200
+    assert edited.json()["status"] == "draft"
+    assert edited.json()["staff_content"] == "Please verify your payment."
+    assert edited.json()["suggested_answer"] == RAGService.INSUFFICIENT_INFORMATION_ANSWER
+    assert edited.json()["updated_at"] is not None
+    assert edited.json()["reviewed_at"] is None
+
+    approved = client.post(f"{url}/approve")
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["staff_content"] == "Please verify your payment."
+    assert approved.json()["reviewed_at"] is not None
+    assert approved.json()["rejection_reason"] is None
+
+    assert client.post(f"{url}/approve").status_code == 409
+    assert client.post(f"{url}/reject", json={"reason": "Too vague"}).status_code == 409
+    assert client.patch(url, json={"staff_content": "Changed"}).status_code == 409
+    assert client.get(url).json() == approved.json()
+
+
+def test_rejected_draft_keeps_reason_and_cannot_be_approved(client) -> None:
+    ticket_id = _create_ticket(client)
+    retrieval = AsyncMock()
+    retrieval.retrieve.return_value = []
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval
+    created = client.post(f"/api/v1/tickets/{ticket_id}/suggested-answer")
+    draft_id = created.json()["draft_id"]
+    url = f"/api/v1/tickets/{ticket_id}/suggested-answers/{draft_id}"
+
+    assert client.post(f"{url}/reject", json={"reason": "   "}).status_code == 422
+    rejected = client.post(f"{url}/reject", json={"reason": "  Missing policy evidence.  "})
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+    assert rejected.json()["rejection_reason"] == "Missing policy evidence."
+    assert rejected.json()["reviewed_at"] is not None
+    assert client.post(f"{url}/approve").status_code == 409
+    assert client.post(f"{url}/reject", json={"reason": "Again"}).status_code == 409
+    assert client.get(url).json() == rejected.json()
