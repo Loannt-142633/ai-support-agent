@@ -37,9 +37,13 @@ class DocumentChunkRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def bulk_create(
-        self, records: Sequence[DocumentChunkCreate]
-    ) -> list[DocumentChunk]:
+    async def has_chunks(self, document_id: UUID) -> bool:
+        """Return whether at least one chunk already exists for this document."""
+
+        existing_chunk = select(DocumentChunk.id).where(DocumentChunk.document_id == document_id)
+        return bool(await self._session.scalar(select(existing_chunk.exists())))
+
+    async def bulk_create(self, records: Sequence[DocumentChunkCreate]) -> list[DocumentChunk]:
         """Insert all chunk records with one bulk statement."""
 
         if not records:
@@ -54,9 +58,7 @@ class DocumentChunkRepository:
             }
             for record in records
         ]
-        result = await self._session.scalars(
-            insert(DocumentChunk).returning(DocumentChunk), values
-        )
+        result = await self._session.scalars(insert(DocumentChunk).returning(DocumentChunk), values)
         return list(result.all())
 
     async def search_similar(
@@ -87,9 +89,9 @@ class DocumentChunkRepository:
             normalized_type = document_type.strip()
             if not normalized_type:
                 raise ValueError("document_type must not be empty")
-            statement = statement.join(
-                Document, Document.id == DocumentChunk.document_id
-            ).where(Document.document_type == normalized_type)
+            statement = statement.join(Document, Document.id == DocumentChunk.document_id).where(
+                Document.document_type == normalized_type
+            )
         if max_distance is not None:
             statement = statement.where(distance <= max_distance)
         statement = statement.order_by(distance.asc()).limit(top_k)

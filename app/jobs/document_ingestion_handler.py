@@ -39,19 +39,23 @@ class DocumentIngestionJobHandler:
         self._embedding = embedding
 
     async def handle(self, document_id: UUID) -> None:
-        """Ingest the document or raise if missing; close this job's session."""
+        """Ingest once or return if chunks exist; close this job's session."""
 
         async with self._session_factory() as session:
             document = await DocumentRepository(session).get_by_id(document_id)
             if document is None:
                 raise DocumentNotFoundError(document_id)
 
+            chunks = DocumentChunkRepository(session)
+            if await chunks.has_chunks(document_id):
+                return
+
             ingestion = DocumentIngestionService(
                 self._storage,
                 self._parser,
                 self._chunking,
                 self._embedding,
-                DocumentChunkRepository(session),
+                chunks,
                 session,
             )
             await ingestion.ingest(document)

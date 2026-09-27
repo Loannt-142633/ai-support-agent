@@ -36,6 +36,7 @@ def test_handle_uses_one_session_to_find_and_ingest_document() -> None:
         patch("app.jobs.document_ingestion_handler.DocumentIngestionService") as ingestion,
     ):
         documents.return_value.get_by_id = AsyncMock(return_value=document)
+        chunks.return_value.has_chunks = AsyncMock(return_value=False)
         ingestion.return_value.ingest = AsyncMock()
         asyncio.run(handler.handle(document_id))
 
@@ -43,9 +44,31 @@ def test_handle_uses_one_session_to_find_and_ingest_document() -> None:
     documents.assert_called_once_with(session)
     documents.return_value.get_by_id.assert_awaited_once_with(document_id)
     chunks.assert_called_once_with(session)
+    chunks.return_value.has_chunks.assert_awaited_once_with(document_id)
     assert ingestion.call_args.args[-2] is chunks.return_value
     assert ingestion.call_args.args[-1] is session
     ingestion.return_value.ingest.assert_awaited_once_with(document)
+    session_factory.return_value.__aexit__.assert_awaited_once()
+
+
+def test_handle_skips_ingestion_when_document_already_has_chunks() -> None:
+    handler, session_factory, session = build_handler()
+    document_id = uuid4()
+    document = Document(id=document_id)
+
+    with (
+        patch("app.jobs.document_ingestion_handler.DocumentRepository") as documents,
+        patch("app.jobs.document_ingestion_handler.DocumentChunkRepository") as chunks,
+        patch("app.jobs.document_ingestion_handler.DocumentIngestionService") as ingestion,
+    ):
+        documents.return_value.get_by_id = AsyncMock(return_value=document)
+        chunks.return_value.has_chunks = AsyncMock(return_value=True)
+        asyncio.run(handler.handle(document_id))
+
+    documents.return_value.get_by_id.assert_awaited_once_with(document_id)
+    chunks.assert_called_once_with(session)
+    chunks.return_value.has_chunks.assert_awaited_once_with(document_id)
+    ingestion.assert_not_called()
     session_factory.return_value.__aexit__.assert_awaited_once()
 
 
@@ -55,6 +78,7 @@ def test_handle_raises_when_document_does_not_exist_and_closes_session() -> None
 
     with (
         patch("app.jobs.document_ingestion_handler.DocumentRepository") as documents,
+        patch("app.jobs.document_ingestion_handler.DocumentChunkRepository") as chunks,
         patch("app.jobs.document_ingestion_handler.DocumentIngestionService") as ingestion,
     ):
         documents.return_value.get_by_id = AsyncMock(return_value=None)
@@ -64,9 +88,7 @@ def test_handle_raises_when_document_does_not_exist_and_closes_session() -> None
     assert error.value.document_id == document_id
     documents.assert_called_once_with(session)
     documents.return_value.get_by_id.assert_awaited_once_with(document_id)
+    chunks.assert_not_called()
     ingestion.assert_not_called()
     session_factory.return_value.__aexit__.assert_awaited_once()
-    assert (
-        session_factory.return_value.__aexit__.await_args.args[0]
-        is DocumentNotFoundError
-    )
+    assert session_factory.return_value.__aexit__.await_args.args[0] is DocumentNotFoundError

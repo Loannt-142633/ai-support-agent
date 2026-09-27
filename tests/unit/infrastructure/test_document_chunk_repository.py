@@ -12,6 +12,21 @@ from app.repositories.document_chunk_repository import (
 from sqlalchemy.sql.dml import Insert
 
 
+@pytest.mark.parametrize("exists", [False, True])
+def test_has_chunks_checks_existence_for_document(exists: bool) -> None:
+    session = AsyncMock()
+    session.scalar.return_value = exists
+    document_id = uuid4()
+
+    result = asyncio.run(DocumentChunkRepository(session).has_chunks(document_id))
+
+    assert result is exists
+    session.scalar.assert_awaited_once()
+    statement = session.scalar.await_args.args[0]
+    assert "EXISTS" in str(statement)
+    assert document_id in statement.compile().params.values()
+
+
 def test_bulk_create_executes_one_insert_for_all_records() -> None:
     session = AsyncMock()
     scalar_result = MagicMock()
@@ -73,9 +88,7 @@ def test_search_similar_does_not_join_documents_without_filter() -> None:
     session.execute.return_value = query_result
 
     result = asyncio.run(
-        DocumentChunkRepository(session).search_similar(
-            query_vector=[1.0, 0.0], top_k=5
-        )
+        DocumentChunkRepository(session).search_similar(query_vector=[1.0, 0.0], top_k=5)
     )
 
     assert result == []
