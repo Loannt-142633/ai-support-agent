@@ -338,11 +338,46 @@ before calling `load_tool_context` in a future agent workflow. There is no HTTP
 route for this tool. Future adapters must supply a
 verified order/customer mapping and truthful provenance.
 
+## Internal staff agent (Gemini)
+
+`AgentService` accepts a staff question and a backend-loaded `ToolExecutionContext`.
+It asks Gemini with the `get_order_payments` declaration. If Gemini requests the
+tool, the service runs `StaffToolDispatcher` once and sends its JSON-compatible
+result back to Gemini for the final answer. A direct answer uses one model call;
+a tool answer uses two. Further function calls are rejected. The Gemini SDK does
+not execute functions automatically in this workflow.
+
+After creating the demo ticket above and configuring `GEMINI_API_KEY`, the
+internal call can be assembled as follows inside an async backend function:
+
+```python
+from app.core.config import get_settings
+from app.llm.providers.gemini_staff_agent import GeminiStaffAgentModel
+from app.services.agent_service import AgentService
+
+settings = get_settings()
+model = GeminiStaffAgentModel(
+    api_key=settings.gemini_api_key,
+    model=settings.gemini_model,
+    timeout=settings.gemini_timeout,
+)
+agent = AgentService(model, StaffToolDispatcher(
+    OrderPaymentsService(FakeOrderPaymentsRepository())
+))
+context = await load_tool_context(ticket_id, TicketRepository(session))
+answer = await agent.answer("Check payments for ORD-DEMO-SINGLE", context=context)
+```
+
+Here `ticket_id` and `session` are backend values; the caller must first
+authenticate staff and authorize access to that ticket. The model controls only
+the tool name and `order_id`, not the customer identity or access decision.
+No public agent endpoint is installed.
+
 Focused tests (after installing `.[dev]`):
 
 ```powershell
 $env:DEBUG = "false"
-.\.venv\Scripts\python.exe -m pytest tests/unit/application/test_order_payments_service.py tests/unit/application/test_order_payments_tool.py
+.\.venv\Scripts\python.exe -m pytest tests/unit/application/test_order_payments_service.py tests/unit/application/test_order_payments_tool.py tests/unit/application/test_agent_service.py tests/unit/infrastructure/test_gemini_staff_agent.py
 ```
 
 ## Checks
