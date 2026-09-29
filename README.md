@@ -254,8 +254,7 @@ loading and inference run in a worker thread. Chunking does not load this model.
 ## Simulated order payments (internal demo)
 
 `FakeOrderPaymentsRepository` provides deterministic in-memory data, **not results
-from a payment provider**. No migration, dependency, API endpoint, agent tool, or
-LLM prompt changes are needed. An async `OrderPaymentsRepository` protocol allows
+from a payment provider**. No migration or dependency change is needed. An async `OrderPaymentsRepository` protocol allows
 a future API/database adapter to replace the fake through constructor injection.
 
 | Order ID | Payment attempts |
@@ -266,47 +265,84 @@ a future API/database adapter to replace the fake through constructor injection.
 | `ORD-DEMO-EMPTY` | Existing order with no payments |
 | `ORD-DEMO-MISSING` | Not found (as with any unknown ID) |
 
-Run this Python example locally; it needs no database, RabbitMQ, or provider:
+The internal Gemini declaration exposes only `order_id`. `StaffToolDispatcher`
+accepts only `get_order_payments` and uses `ToolExecutionContext.ticket.user_id`,
+never a customer ID supplied by the model. It returns JSON-compatible payment
+facts (`Decimal` amounts as strings, UTC timestamps as ISO 8601), or a structured
+error. It does not call Gemini or expose an HTTP endpoint.
+
+For a demo with the default repository, first apply migrations and create a
+customer with the fixed ID, then a ticket for that customer. For example, run
+this once in a local Python session connected to the demo database:
 
 ```python
 import asyncio
+from app.db.session import SessionLocal
+from app.models.ticket import Ticket
+from app.models.user import User
+from app.repositories.ticket_repository import TicketRepository
 from app.repositories.fake_order_payments_repository import (
     DEMO_CUSTOMER_ID, FakeOrderPaymentsRepository,
 )
 from app.services.order_payments_service import OrderPaymentsService
+from app.tools.order_payments import StaffToolDispatcher, load_tool_context
 
-service = OrderPaymentsService(FakeOrderPaymentsRepository())
-result = asyncio.run(service.get_order_payments(
-    "ORD-DEMO-DOUBLE", ticket_user_id=DEMO_CUSTOMER_ID,
-))
-print(result)
+async def demo():
+    async with SessionLocal() as session:
+        customer = await session.get(User, DEMO_CUSTOMER_ID)
+        if customer is None:
+            session.add(User(
+                id=DEMO_CUSTOMER_ID,
+                name="Demo customer",
+                email="payment-demo@example.invalid",
+            ))
+        ticket = Ticket(
+            user_id=DEMO_CUSTOMER_ID,
+            title="Payment question",
+            description="Please check this order.",
+        )
+        session.add(ticket)
+        await session.commit()
+        context = await load_tool_context(ticket.id, TicketRepository(session))
+        dispatcher = StaffToolDispatcher(OrderPaymentsService(FakeOrderPaymentsRepository()))
+        result = await dispatcher.dispatch(
+            "get_order_payments", {"order_id": "ORD-DEMO-DOUBLE"}, context
+        )
+        print(result)
+
+asyncio.run(demo())
 ```
 
-Every result includes `order_id`, `status` (`found` or `not_found`), `user_id`,
-`payments`, and `source` with `is_simulated=True`. Unknown orders return no customer
-and an empty tuple; existing empty orders return `found`. Amounts are `Decimal`
-(serialize as strings at a future tool boundary), timestamps are fixed UTC, and
-records are immutable. Two successful payments are facts for investigating a
+Successful tool results include `order_id`, `status` (`found` or `not_found`),
+`payments`, and `source` with `is_simulated=True`. For example, the demo call
+above returns `status: "found"`, two `succeeded` payments with
+`amount: "125000.00"`, and `source.name: "fake_order_payments"`.
+`ORD-DEMO-MISSING` returns `not_found` with `payments: []`;
+`ORD-DEMO-EMPTY` returns `found` with `payments: []`.
+Service records remain immutable with `Decimal` amounts and fixed UTC times.
+Two successful payments are facts for investigating a
 possible duplicate, not proof of one; the failed attempt in `ORD-DEMO-RETRY`
 must not count as money collected. This service makes no duplicate-charge verdict.
 
 The default synthetic customer UUID is `00000000-0000-4000-8000-000000000001`;
-it is **not seeded into users**. For an existing local demo ticket, explicitly
-construct `FakeOrderPaymentsRepository(demo_customer_id=ticket.user_id)` once
-with a non-null customer ID, then call with `ticket_user_id=ticket.user_id`.
-This binds synthetic fixtures for the demo only; it does not discover real orders.
+it is **not seeded into users**. For an existing local demo ticket, an explicit
+backend setup can instead use `FakeOrderPaymentsRepository(demo_customer_id=ticket.user_id)`
+with a non-null customer ID. Never construct this adapter from function-call
+arguments or silently bind every ticket to the demo orders.
 The service rejects missing or mismatched ticket customers with
 `OrderPaymentsAccessError`. The caller must load the ticket from trusted storage;
 never accept its customer ID from the LLM or treat it as staff authentication.
-Staff identity and ticket-access authorization remain unimplemented, so this
-service is internal only and has no HTTP route. Future adapters must supply a
+Staff identity and ticket-access authorization remain unimplemented. The code
+above is for a trusted local test; authenticate and authorize staff to the ticket
+before calling `load_tool_context` in a future agent workflow. There is no HTTP
+route for this tool. Future adapters must supply a
 verified order/customer mapping and truthful provenance.
 
 Focused tests (after installing `.[dev]`):
 
 ```powershell
 $env:DEBUG = "false"
-.\.venv\Scripts\python.exe -m pytest tests/unit/application/test_order_payments_service.py
+.\.venv\Scripts\python.exe -m pytest tests/unit/application/test_order_payments_service.py tests/unit/application/test_order_payments_tool.py
 ```
 
 ## Checks
