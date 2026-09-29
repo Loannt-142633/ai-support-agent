@@ -332,10 +332,9 @@ arguments or silently bind every ticket to the demo orders.
 The service rejects missing or mismatched ticket customers with
 `OrderPaymentsAccessError`. The caller must load the ticket from trusted storage;
 never accept its customer ID from the LLM or treat it as staff authentication.
-Staff identity and ticket-access authorization remain unimplemented. The code
+Real staff identity and ticket-access authorization remain unimplemented. The code
 above is for a trusted local test; authenticate and authorize staff to the ticket
-before calling `load_tool_context` in a future agent workflow. There is no HTTP
-route for this tool. Future adapters must supply a
+before calling `load_tool_context` in a future production workflow. Future adapters must supply a
 verified order/customer mapping and truthful provenance.
 
 ## Internal staff agent (Gemini)
@@ -368,16 +367,54 @@ context = await load_tool_context(ticket_id, TicketRepository(session))
 answer = await agent.answer("Check payments for ORD-DEMO-SINGLE", context=context)
 ```
 
-Here `ticket_id` and `session` are backend values; the caller must first
-authenticate staff and authorize access to that ticket. The model controls only
+Here `ticket_id` and `session` are backend values. The model controls only
 the tool name and `order_id`, not the customer identity or access decision.
-No public agent endpoint is installed.
+
+### Local demo API
+
+The route `POST /api/v1/tickets/{ticket_id}/agent/ask` is registered **only**
+when `APP_ENV=local` and `DEMO_STAFF_AUTH_ENABLED=true`. Both default to a
+closed state. When demo auth is enabled with `APP_ENV=production`, the app
+refuses to start. The Docker Compose API forces `APP_ENV=production`, so a
+local demo flag accidentally left in `.env` cannot enable this route there.
+
+Create the customer and ticket with `DEMO_CUSTOMER_ID` using the Python example
+above. Copy the resulting ticket UUID into local `.env` and configure:
+
+```dotenv
+APP_ENV=local
+DEMO_STAFF_AUTH_ENABLED=true
+DEMO_STAFF_ID=local-demo-staff
+DEMO_STAFF_TICKET_IDS=["paste-ticket-uuid-here"]
+GEMINI_API_KEY=your-local-key
+```
+
+Replace the placeholder with a real UUID, or configuration validation will
+reject startup. Multiple ticket IDs can be included in the JSON list. Restart
+the local API after editing the allowlist, and bind it to loopback:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+$ticketId = "paste-ticket-uuid-here"
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/v1/tickets/$ticketId/agent/ask" -ContentType "application/json" -Body '{"message":"Check payments for ORD-DEMO-SINGLE"}'
+```
+
+The response is `{"ticket_id":"...","answer":"..."}` for staff inspection;
+it does not create a draft, approve one, or send email. The backend supplies a
+fixed demo staff identity and permits only allowlisted tickets. The route also
+rejects non-loopback peers without trusting forwarded headers or claimed staff
+headers/body fields. An unknown allowed ticket returns 404, a non-allowlisted
+ticket returns 403, and an empty message returns 422. Mock auth is only for
+local testing: it cannot distinguish real staff members, and it must not be
+exposed through a proxy. The fake payment adapter still maps orders only to
+`DEMO_CUSTOMER_ID`, so other customers' tickets cannot read those orders.
 
 Focused tests (after installing `.[dev]`):
 
 ```powershell
 $env:DEBUG = "false"
 .\.venv\Scripts\python.exe -m pytest tests/unit/application/test_order_payments_service.py tests/unit/application/test_order_payments_tool.py tests/unit/application/test_agent_service.py tests/unit/infrastructure/test_gemini_staff_agent.py
+.\.venv\Scripts\python.exe -m pytest tests/integration/test_agent_api.py tests/unit/application/test_demo_staff_settings.py
 ```
 
 ## Checks

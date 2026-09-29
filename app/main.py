@@ -5,13 +5,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import router as api_router
-from app.core.config import get_settings
+from app.api.v1.agent import router as agent_router
+from app.core.config import Settings, get_settings
 
 
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application and wire its outer adapters."""
 
-    settings = get_settings()
+    settings = settings or get_settings()
     application = FastAPI(title=settings.app_name, debug=settings.debug)
     application.add_middleware(
         CORSMiddleware,
@@ -21,6 +22,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(api_router)
+    if settings.demo_staff_auth_enabled:
+        if settings.app_env != "local":
+            raise RuntimeError("Demo agent cannot start outside the local environment")
+        application.include_router(agent_router, prefix="/api/v1")
     return application
 
 
@@ -30,4 +35,5 @@ app = create_app()
 def run() -> None:
     """Run the local development server."""
 
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    host = "127.0.0.1" if get_settings().demo_staff_auth_enabled else "0.0.0.0"
+    uvicorn.run("app.main:app", host=host, port=8000, reload=True)

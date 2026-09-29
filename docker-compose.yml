@@ -58,6 +58,7 @@ services:
       target: api
     env_file: .env
     environment:
+      APP_ENV: production
       DATABASE_URL: postgresql+psycopg://app:app@db:5432/ai_support_agent
       RABBITMQ_URL: amqp://app:app@rabbitmq:5672/
       DOCUMENT_STORAGE_DIR: /app/uploads/documents

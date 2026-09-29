@@ -14,6 +14,7 @@ from app.embeddings.e5 import E5EmbeddingModel
 from app.llm.client import LLMClient
 from app.llm.deferred import DeferredLLMClient
 from app.llm.providers.gemini import GeminiLLMClient
+from app.llm.providers.gemini_staff_agent import GeminiStaffAgentModel
 from app.messaging.rabbitmq import (
     RabbitMQDocumentIngestionPublisher,
     RabbitMQTicketAnalysisPublisher,
@@ -27,6 +28,7 @@ from app.repositories.ticket_ai_analysis_repository import TicketAIAnalysisRepos
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.ticket_suggested_answer_repository import TicketSuggestedAnswerRepository
 from app.repositories.user_repository import UserRepository
+from app.services.agent_service import StaffAgentModel
 from app.services.chunking_service import ChunkingService
 from app.services.document_ingestion_publisher import DocumentIngestionPublisher
 from app.services.document_ingestion_service import DocumentIngestionService
@@ -251,3 +253,14 @@ def get_ticket_analysis_service(llm_client: LLMClientDependency) -> TicketAnalys
     """Build the ticket analysis service with the configured LLM client."""
 
     return TicketAnalysisService(llm_client)
+
+
+@lru_cache
+def get_gemini_staff_agent_model() -> StaffAgentModel:
+    """Reuse one Gemini client for local staff demo requests."""
+    settings = get_settings()
+    return GeminiStaffAgentModel(
+        api_key=settings.gemini_api_key,
+        model=settings.gemini_model,
+        timeout=settings.gemini_timeout,
+    )
