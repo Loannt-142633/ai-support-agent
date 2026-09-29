@@ -251,6 +251,64 @@ The model configured in `EMBEDDING_MODEL` is loaded lazily and reused through
 `get_embedding_client()`. First use downloads the model if it is not cached;
 loading and inference run in a worker thread. Chunking does not load this model.
 
+## Simulated order payments (internal demo)
+
+`FakeOrderPaymentsRepository` provides deterministic in-memory data, **not results
+from a payment provider**. No migration, dependency, API endpoint, agent tool, or
+LLM prompt changes are needed. An async `OrderPaymentsRepository` protocol allows
+a future API/database adapter to replace the fake through constructor injection.
+
+| Order ID | Payment attempts |
+| --- | --- |
+| `ORD-DEMO-SINGLE` | One succeeded payment of VND 125000.00 |
+| `ORD-DEMO-DOUBLE` | Two succeeded payments of VND 125000.00 each |
+| `ORD-DEMO-RETRY` | One failed and one succeeded attempt of VND 125000.00 each |
+| `ORD-DEMO-EMPTY` | Existing order with no payments |
+| `ORD-DEMO-MISSING` | Not found (as with any unknown ID) |
+
+Run this Python example locally; it needs no database, RabbitMQ, or provider:
+
+```python
+import asyncio
+from app.repositories.fake_order_payments_repository import (
+    DEMO_CUSTOMER_ID, FakeOrderPaymentsRepository,
+)
+from app.services.order_payments_service import OrderPaymentsService
+
+service = OrderPaymentsService(FakeOrderPaymentsRepository())
+result = asyncio.run(service.get_order_payments(
+    "ORD-DEMO-DOUBLE", ticket_user_id=DEMO_CUSTOMER_ID,
+))
+print(result)
+```
+
+Every result includes `order_id`, `status` (`found` or `not_found`), `user_id`,
+`payments`, and `source` with `is_simulated=True`. Unknown orders return no customer
+and an empty tuple; existing empty orders return `found`. Amounts are `Decimal`
+(serialize as strings at a future tool boundary), timestamps are fixed UTC, and
+records are immutable. Two successful payments are facts for investigating a
+possible duplicate, not proof of one; the failed attempt in `ORD-DEMO-RETRY`
+must not count as money collected. This service makes no duplicate-charge verdict.
+
+The default synthetic customer UUID is `00000000-0000-4000-8000-000000000001`;
+it is **not seeded into users**. For an existing local demo ticket, explicitly
+construct `FakeOrderPaymentsRepository(demo_customer_id=ticket.user_id)` once
+with a non-null customer ID, then call with `ticket_user_id=ticket.user_id`.
+This binds synthetic fixtures for the demo only; it does not discover real orders.
+The service rejects missing or mismatched ticket customers with
+`OrderPaymentsAccessError`. The caller must load the ticket from trusted storage;
+never accept its customer ID from the LLM or treat it as staff authentication.
+Staff identity and ticket-access authorization remain unimplemented, so this
+service is internal only and has no HTTP route. Future adapters must supply a
+verified order/customer mapping and truthful provenance.
+
+Focused tests (after installing `.[dev]`):
+
+```powershell
+$env:DEBUG = "false"
+.\.venv\Scripts\python.exe -m pytest tests/unit/application/test_order_payments_service.py
+```
+
 ## Checks
 
 ```powershell
