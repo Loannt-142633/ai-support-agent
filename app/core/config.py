@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     rabbitmq_management_url: str = "http://localhost:15672"
     document_ingestion_queue: str = "document.ingestion"
     ticket_analysis_queue: str = "ticket.analysis"
+    kafka_bootstrap_servers: str = "localhost:9092"
+    ticket_created_topic: str = "ticket.created"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_from_email: str = ""

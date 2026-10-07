@@ -15,6 +15,7 @@ from app.llm.client import LLMClient
 from app.llm.deferred import DeferredLLMClient
 from app.llm.providers.gemini import GeminiLLMClient
 from app.llm.providers.gemini_staff_agent import GeminiStaffAgentModel
+from app.messaging.kafka import KafkaTicketCreatedPublisher
 from app.messaging.rabbitmq import (
     RabbitMQDocumentIngestionPublisher,
     RabbitMQTicketAnalysisPublisher,
@@ -41,6 +42,7 @@ from app.services.suggested_answer_delivery_service import SuggestedAnswerDelive
 from app.services.suggested_answer_service import SuggestedAnswerService
 from app.services.ticket_analysis_publisher import TicketAnalysisPublisher
 from app.services.ticket_analysis_service import TicketAnalysisService
+from app.services.ticket_created_publisher import TicketCreatedPublisher
 from app.services.ticket_service import TicketService
 from app.services.user_service import UserService
 from app.storage.local import LocalDocumentStorage
@@ -126,13 +128,26 @@ def get_ticket_analysis_publisher() -> TicketAnalysisPublisher:
     )
 
 
+def get_ticket_created_publisher() -> TicketCreatedPublisher:
+    """Build the Kafka publisher for committed ticket creation events."""
+
+    settings = get_settings()
+    return KafkaTicketCreatedPublisher(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        topic=settings.ticket_created_topic,
+    )
+
+
 def get_ticket_service(
     session: DbSession,
     publisher: Annotated[TicketAnalysisPublisher, Depends(get_ticket_analysis_publisher)],
+    created_publisher: Annotated[TicketCreatedPublisher, Depends(get_ticket_created_publisher)],
 ) -> TicketService:
     """Build a ticket service for the current request."""
 
-    return TicketService(TicketRepository(session), UserRepository(session), session, publisher)
+    return TicketService(
+        TicketRepository(session), UserRepository(session), session, publisher, created_publisher
+    )
 
 
 def get_ticket_repository(session: DbSession) -> TicketRepository:

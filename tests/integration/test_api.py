@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock
 from uuid import UUID
 
-from app.api.dependencies import get_ticket_analysis_publisher
+from app.api.dependencies import get_ticket_analysis_publisher, get_ticket_created_publisher
 from app.main import app
 
 
@@ -14,7 +14,9 @@ def test_health_check(client) -> None:
 
 def test_create_ticket(client) -> None:
     publisher = AsyncMock()
+    created_publisher = AsyncMock()
     app.dependency_overrides[get_ticket_analysis_publisher] = lambda: publisher
+    app.dependency_overrides[get_ticket_created_publisher] = lambda: created_publisher
     user_response = client.post(
         "/api/v1/users",
         json={"name": "Ada Lovelace", "email": "ada@example.com"},
@@ -35,3 +37,4 @@ def test_create_ticket(client) -> None:
     assert response.status_code == 201
     assert response.json()["status"] == "open"
     publisher.publish.assert_awaited_once_with(UUID(response.json()["id"]))
+    assert created_publisher.publish.await_args.args[0].ticket_id == UUID(response.json()["id"])

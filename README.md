@@ -194,6 +194,22 @@ As with document uploads, a DB commit can succeed while publishing fails;
 the ticket then remains saved without a queued analysis job. This gap needs
 an outbox or equivalent reliability mechanism in a later step.
 
+## Kafka ticket creation event
+
+Compose starts a Kafka broker and creates the `ticket.created` topic with three
+partitions. After a ticket is committed, the API publishes
+`{"version":1,"ticket_id":"<uuid>"}` with the UTF-8 `ticket_id` as the Kafka
+message key. Messages for the same ticket therefore map to the same partition.
+The existing RabbitMQ ticket analysis job is still published separately. This
+step only publishes the Kafka event; notification and statistics consumers are
+not started yet.
+
+Inside Compose, `KAFKA_BOOTSTRAP_SERVERS` is `kafka:9092`. For a host Python
+process, set it to `localhost:9094`. The topic name can be set with
+`TICKET_CREATED_TOPIC`. A failed Kafka publish raises an API error after the
+ticket has already been saved. A transactional outbox is needed to close this
+commit/publish gap in a later step.
+
 ## Run
 
 The Docker command is `docker compose up --build -d`. For local Python
@@ -377,6 +393,9 @@ when `APP_ENV=local` and `DEMO_STAFF_AUTH_ENABLED=true`. Both default to a
 closed state. When demo auth is enabled with `APP_ENV=production`, the app
 refuses to start. The Docker Compose API forces `APP_ENV=production`, so a
 local demo flag accidentally left in `.env` cannot enable this route there.
+Consequently, `docker compose up --build api` serves the normal API but returns
+404 for `/agent/ask` by design. Rebuilding that service does not enable the
+demo route.
 
 Create the customer and ticket with `DEMO_CUSTOMER_ID` using the Python example
 above. Copy the resulting ticket UUID into local `.env` and configure:
@@ -398,6 +417,34 @@ the local API after editing the allowlist, and bind it to loopback:
 $ticketId = "paste-ticket-uuid-here"
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/v1/tickets/$ticketId/agent/ask" -ContentType "application/json" -Body '{"message":"Check payments for ORD-DEMO-SINGLE"}'
 ```
+
+If the Compose API already occupies port 8000, leave its database and RabbitMQ
+running and start a **separate host Python process** for the demo on port 8001.
+The host process must use the published localhost database address (the Docker
+hostname `db` works only inside Compose). In PowerShell:
+
+```powershell
+$ticketId = "paste-ticket-uuid-here"
+$env:APP_ENV = "local"
+$env:DEMO_STAFF_AUTH_ENABLED = "true"
+$env:DEMO_STAFF_TICKET_IDS = '["' + $ticketId + '"]'
+$env:DATABASE_URL = "postgresql+psycopg://app:app@localhost:5432/ai_support_agent"
+$env:RABBITMQ_URL = "amqp://app:app@localhost:5672/"
+$env:DEBUG = "false"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+In a second PowerShell terminal:
+
+```powershell
+$ticketId = "paste-ticket-uuid-here"
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8001/api/v1/tickets/$ticketId/agent/ask" -ContentType "application/json" -Body (@{ message = "Check payments for ORD-DEMO-SINGLE" } | ConvertTo-Json)
+```
+
+Set `GEMINI_API_KEY` in local `.env` before starting the host process. The
+ticket must already exist in the same PostgreSQL database and be on the
+allowlist; to inspect the fake order payments, its `user_id` must be
+`DEMO_CUSTOMER_ID` as in the example above.
 
 The response is `{"ticket_id":"...","answer":"..."}` for staff inspection;
 it does not create a draft, approve one, or send email. The backend supplies a

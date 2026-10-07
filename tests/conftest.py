@@ -1,7 +1,9 @@
 import asyncio
 from collections.abc import AsyncGenerator, Generator
+from unittest.mock import AsyncMock
 
 import pytest
+from app.api.dependencies import get_ticket_created_publisher
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -28,10 +30,12 @@ def client() -> Generator[TestClient, None, None]:
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_ticket_created_publisher] = lambda: AsyncMock()
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.clear()
+
         async def drop_tables() -> None:
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.drop_all)

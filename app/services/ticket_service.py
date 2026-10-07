@@ -9,6 +9,7 @@ from app.models.ticket import Ticket, TicketCategory, TicketPriority, TicketStat
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
 from app.services.ticket_analysis_publisher import TicketAnalysisPublisher
+from app.services.ticket_created_publisher import TicketCreated, TicketCreatedPublisher
 
 
 class TicketService:
@@ -20,11 +21,13 @@ class TicketService:
         user_repository: UserRepository,
         session: AsyncSession,
         analysis_publisher: TicketAnalysisPublisher,
+        created_publisher: TicketCreatedPublisher,
     ) -> None:
         self._tickets = ticket_repository
         self._users = user_repository
         self._session = session
         self._analysis_publisher = analysis_publisher
+        self._created_publisher = created_publisher
 
     async def create(
         self,
@@ -52,6 +55,7 @@ class TicketService:
             await self._session.rollback()
             raise
 
+        await self._created_publisher.publish(TicketCreated(ticket_id=ticket.id))
         await self._analysis_publisher.publish(ticket.id)
         await self._session.refresh(ticket)
         return ticket
