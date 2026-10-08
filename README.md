@@ -153,8 +153,8 @@ after Kafka confirms the publish. Kafka publish failures are retried three
 times; after that the RabbitMQ delivery is requeued, so a redelivery can reuse
 the saved analysis without another LLM call. A publish that succeeds just
 before an ACK failure can be repeated, so downstream consumers should use the
-stable `analysis_id` to deduplicate. This step only emits the event; it does not
-notify staff yet. Set `ANALYSIS_COMPLETED_TOPIC` to override the topic name.
+stable `analysis_id` to deduplicate. Set `ANALYSIS_COMPLETED_TOPIC` to override
+the topic name.
 
 `GET /api/v1/tickets/{ticket_id}/analysis` returns `{"status":"pending"}`
 while no analysis record exists, or `{"status":"completed", "category": ...,
@@ -211,18 +211,27 @@ partitions. After a ticket is committed, the API publishes
 `{"version":1,"ticket_id":"<uuid>"}` with the UTF-8 `ticket_id` as the Kafka
 message key. Messages for the same ticket therefore map to the same partition.
 The existing RabbitMQ ticket analysis job is still published separately.
-Two independent workers subscribe to the same topic: `ticket-notifications`
-and `ticket-metrics`. Each currently logs `ticket_id`, partition, offset, and
-group ID, then commits that record's next offset. They do not send notifications
-or calculate metrics yet. If parsing or logging fails, the offset is not
-committed, so the worker exits and Compose restarts it for replay.
+Two independent groups, `ticket-notifications` and `ticket-metrics`, subscribe
+to both `ticket.created` and `analysis.completed`. Both log event IDs,
+partition, offset, and group ID. For `analysis.completed`, the notifications
+group also publishes `{"version":1,"event":"analysis.completed", "ticket_id":"<uuid>",
+"analysis_id":"<uuid>"}` to Redis Pub/Sub channel `ticket.notifications` before
+committing its Kafka offset. The metrics group only logs for now. `ticket.created`
+is still only logged by both groups. If parsing, logging, or Redis publishing
+fails, the offset is not committed; Compose restarts the worker for replay.
+Redis Pub/Sub is transient: subscribers must already be connected to receive a
+message, and a failure between Redis publish and Kafka commit can publish a
+duplicate. Subscribers should deduplicate using `analysis_id`. This does not
+yet implement staff-facing delivery or calculate metrics.
 
 Inspect the workers with `docker compose logs -f ticket-notifications
 ticket-metrics` after creating a ticket. Both groups receive every new event;
 `auto_offset_reset=earliest` also lets a new group replay retained events.
 
 Inside Compose, `KAFKA_BOOTSTRAP_SERVERS` is `kafka:9092`. For a host Python
-process, set it to `localhost:9094`. The topic name can be set with
+process, set it to `localhost:9094`; set `REDIS_URL=redis://localhost:6379/0`
+for the notification worker. Override the channel with
+`REDIS_NOTIFICATION_CHANNEL`. The topic name can be set with
 `TICKET_CREATED_TOPIC`. A failed Kafka publish raises an API error after the
 ticket has already been saved. A transactional outbox is needed to close this
 commit/publish gap in a later step.

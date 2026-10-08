@@ -79,6 +79,15 @@ services:
         condition: service_healthy
     entrypoint: ["/opt/kafka/bin/kafka-topics.sh"]
     command: ["--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "${ANALYSIS_COMPLETED_TOPIC:-analysis.completed}", "--partitions", "3", "--replication-factor", "1"]
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
   migrate:
     build:
       context: .
@@ -167,9 +176,14 @@ services:
     env_file: .env
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       kafka-setup:
         condition: service_completed_successfully
+      kafka-analysis-setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     restart: on-failure
     command: ["python", "-m", "app.kafka_worker", "ticket-notifications"]
   ticket-metrics:
@@ -181,6 +195,8 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       kafka-setup:
+        condition: service_completed_successfully
+      kafka-analysis-setup:
         condition: service_completed_successfully
     restart: on-failure
     command: ["python", "-m", "app.kafka_worker", "ticket-metrics"]

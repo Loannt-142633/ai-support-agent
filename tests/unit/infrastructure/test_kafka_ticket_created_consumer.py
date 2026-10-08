@@ -78,16 +78,23 @@ def test_worker_subscribes_with_own_group_and_manual_commit(group_id: str) -> No
     consumer.getmany = AsyncMock(side_effect=getmany)
     consumer.commit = AsyncMock()
     settings = SimpleNamespace(
-        ticket_created_topic="ticket.created", kafka_bootstrap_servers="localhost:9092"
+        ticket_created_topic="ticket.created",
+        analysis_completed_topic="analysis.completed",
+        kafka_bootstrap_servers="localhost:9092",
+        redis_url="redis://localhost:6379/0",
+        redis_notification_channel="ticket.notifications",
     )
+    redis = Mock(aclose=AsyncMock())
     with (
         patch("app.kafka_worker.AIOKafkaConsumer", return_value=consumer) as factory,
         patch("app.kafka_worker.get_settings", return_value=settings),
+        patch("app.kafka_worker.Redis.from_url", return_value=redis) as redis_factory,
     ):
         asyncio.run(run_worker(group_id, stop_event))
 
     factory.assert_called_once_with(
         "ticket.created",
+        "analysis.completed",
         bootstrap_servers="localhost:9092",
         group_id=group_id,
         enable_auto_commit=False,
@@ -96,3 +103,7 @@ def test_worker_subscribes_with_own_group_and_manual_commit(group_id: str) -> No
     consumer.start.assert_awaited_once()
     consumer.commit.assert_awaited_once_with({TopicPartition("ticket.created", 0): 4})
     consumer.stop.assert_awaited_once()
+    if group_id == "ticket-notifications":
+        redis_factory.assert_called_once_with("redis://localhost:6379/0")
+    else:
+        redis_factory.assert_not_called()

@@ -99,6 +99,44 @@ def encode_analysis_completed(event: AnalysisCompleted) -> bytes:
     ).encode("utf-8")
 
 
+def decode_analysis_completed(value: bytes, key: bytes | None) -> AnalysisCompleted:
+    """Validate an analysis event and its ticket ID message key."""
+
+    try:
+        payload = json.loads(value)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("version") != 1
+            or not isinstance(payload.get("ticket_id"), str)
+            or not isinstance(payload.get("analysis_id"), str)
+        ):
+            raise ValueError("Invalid analysis.completed event")
+        ticket_id = UUID(payload["ticket_id"])
+        analysis_id = UUID(payload["analysis_id"])
+        if key != str(ticket_id).encode("utf-8"):
+            raise ValueError("ticket_id does not match Kafka message key")
+        return AnalysisCompleted(ticket_id=ticket_id, analysis_id=analysis_id)
+    except (UnicodeDecodeError, TypeError, ValueError) as error:
+        raise ValueError("Invalid analysis.completed event") from error
+
+
+async def log_analysis_completed(
+    consumer: AIOKafkaConsumer, message: ConsumerRecord, *, group_id: str
+) -> None:
+    """Log a valid analysis completion and commit its next offset."""
+
+    event = decode_analysis_completed(message.value, message.key)
+    logger.info(
+        "event=analysis.completed ticket_id=%s analysis_id=%s partition=%s offset=%s group_id=%s",
+        event.ticket_id,
+        event.analysis_id,
+        message.partition,
+        message.offset,
+        group_id,
+    )
+    await consumer.commit({TopicPartition(message.topic, message.partition): message.offset + 1})
+
+
 class KafkaAnalysisCompletedPublisher:
     """Publish analysis completion with ticket ID as the Kafka message key."""
 

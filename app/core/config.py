@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:9092"
     ticket_created_topic: str = "ticket.created"
     analysis_completed_topic: str = "analysis.completed"
+    redis_url: str = "redis://localhost:6379/0"
+    redis_notification_channel: str = "ticket.notifications"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_from_email: str = ""
