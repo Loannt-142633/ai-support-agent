@@ -224,6 +224,20 @@ message, and a failure between Redis publish and Kafka commit can publish a
 duplicate. Subscribers should deduplicate using `analysis_id`. This does not
 yet implement staff-facing delivery or calculate metrics.
 
+The API subscribes to `ticket.notifications` during its lifespan and forwards
+each `analysis.completed` event over
+`ws://127.0.0.1:8001/api/v1/tickets/{ticket_id}/notifications/ws` to clients
+watching that ticket. The WebSocket uses the existing local demo staff gate:
+`APP_ENV=local`, `DEMO_STAFF_AUTH_ENABLED=true`, a loopback peer, and a ticket ID
+in `DEMO_STAFF_TICKET_IDS`. Browser `Origin` must be in `CORS_ORIGINS` (default
+`http://localhost:3000`). The ticket must still exist. The production API does
+not currently have real staff authentication, so it refuses WebSocket clients.
+WebSocket payloads contain only `version`, `event`, `ticket_id`, and
+`analysis_id`. On connection and reconnect, the frontend should call
+`GET /api/v1/tickets/{ticket_id}/analysis` to read the latest saved analysis;
+Redis Pub/Sub does not replay missed messages. The existing REST endpoint has
+no staff authorization yet and must be protected before public deployment.
+
 Inspect the workers with `docker compose logs -f ticket-notifications
 ticket-metrics` after creating a ticket. Both groups receive every new event;
 `auto_offset_reset=earliest` also lets a new group replay retained events.

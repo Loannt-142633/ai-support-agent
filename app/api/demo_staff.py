@@ -6,6 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
+from starlette.requests import HTTPConnection
 
 from app.api.dependencies import get_gemini_staff_agent_model, get_ticket_repository
 from app.core.config import Settings, get_settings
@@ -33,7 +34,7 @@ class DemoStaffAuth:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    def authenticate(self, request: Request) -> DemoStaffIdentity:
+    def authenticate(self, request: HTTPConnection) -> DemoStaffIdentity:
         """Ignore client-claimed identities, roles and forwarded-for headers."""
         if not self._settings.demo_staff_auth_enabled or self._settings.app_env != "local":
             raise HTTPException(status_code=403, detail="Demo agent is disabled")
