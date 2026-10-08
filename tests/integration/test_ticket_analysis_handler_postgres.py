@@ -17,6 +17,7 @@ from app.models.ticket_ai_analysis import TicketAIAnalysis
 from app.repositories.ticket_ai_analysis_repository import TicketAIAnalysisRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
+from app.services.analysis_completed_publisher import AnalysisCompleted
 from app.services.ticket_analysis_service import TicketAnalysisService
 from sqlalchemy import func, select
 
@@ -63,7 +64,8 @@ async def _run_analysis_and_redelivery() -> None:
         handler = TicketAnalysisJobHandler(
             SessionLocal, TicketAnalysisService(llm), model_name="test-model"
         )
-        consumer = RabbitMQTicketAnalysisConsumer(handler)
+        completed_publisher = SimpleNamespace(publish=AsyncMock())
+        consumer = RabbitMQTicketAnalysisConsumer(handler, completed_publisher)
         for _ in range(2):
             message = SimpleNamespace(
                 body=json.dumps({"ticket_id": str(ticket_id)}).encode(),
@@ -92,6 +94,10 @@ async def _run_analysis_and_redelivery() -> None:
         assert record.prompt_version == "v1"
         assert record.confidence is None
         assert llm.calls == 1
+        assert completed_publisher.publish.await_count == 2
+        first_event = completed_publisher.publish.await_args_list[0].args[0]
+        assert first_event == AnalysisCompleted(ticket_id=ticket_id, analysis_id=record.id)
+        assert completed_publisher.publish.await_args_list[1].args[0] == first_event
 
         async with SessionLocal() as session:
             failing_ticket = await TicketRepository(session).create(
@@ -117,7 +123,9 @@ async def _run_analysis_and_redelivery() -> None:
             ack=AsyncMock(),
             reject=AsyncMock(),
         )
-        await RabbitMQTicketAnalysisConsumer(failing_handler).process_message(failing_message)
+        await RabbitMQTicketAnalysisConsumer(failing_handler, completed_publisher).process_message(
+            failing_message
+        )
         failing_message.ack.assert_not_awaited()
         failing_message.reject.assert_awaited_once_with(requeue=False)
         async with SessionLocal() as session:

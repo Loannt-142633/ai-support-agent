@@ -146,6 +146,16 @@ temporary DB, LLM timeout, and rate-limit failures up to three attempts, and
 rejects terminal failures to `ticket.analysis.failed`. The existing-analysis
 check prevents sequential duplicates; concurrent workers processing the same
 ticket are not yet protected against duplicate records.
+After the analysis record is committed, the ticket worker publishes
+`{"version":1,"ticket_id":"<uuid>","analysis_id":"<uuid>"}` to the Kafka
+topic `analysis.completed`, keyed by `ticket_id`. It ACKs the RabbitMQ job only
+after Kafka confirms the publish. Kafka publish failures are retried three
+times; after that the RabbitMQ delivery is requeued, so a redelivery can reuse
+the saved analysis without another LLM call. A publish that succeeds just
+before an ACK failure can be repeated, so downstream consumers should use the
+stable `analysis_id` to deduplicate. This step only emits the event; it does not
+notify staff yet. Set `ANALYSIS_COMPLETED_TOPIC` to override the topic name.
+
 `GET /api/v1/tickets/{ticket_id}/analysis` returns `{"status":"pending"}`
 while no analysis record exists, or `{"status":"completed", "category": ...,
 "priority": ..., "summary": ..., "requires_human": ...}` once one is saved.

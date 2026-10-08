@@ -72,6 +72,13 @@ services:
         condition: service_healthy
     entrypoint: ["/opt/kafka/bin/kafka-topics.sh"]
     command: ["--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "${TICKET_CREATED_TOPIC:-ticket.created}", "--partitions", "3", "--replication-factor", "1"]
+  kafka-analysis-setup:
+    image: apache/kafka:3.9.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/opt/kafka/bin/kafka-topics.sh"]
+    command: ["--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "${ANALYSIS_COMPLETED_TOPIC:-analysis.completed}", "--partitions", "3", "--replication-factor", "1"]
   migrate:
     build:
       context: .
@@ -144,10 +151,13 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@db:5432/ai_support_agent
       RABBITMQ_URL: amqp://app:app@rabbitmq:5672/
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       migrate:
         condition: service_completed_successfully
       rabbitmq-setup:
+        condition: service_completed_successfully
+      kafka-analysis-setup:
         condition: service_completed_successfully
     command: ["python", "-m", "app.ticket_worker"]
   ticket-notifications:

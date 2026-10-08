@@ -12,6 +12,7 @@ from app.api.dependencies import get_llm_client, get_ticket_analysis_service
 from app.core.config import get_settings
 from app.db.session import SessionLocal, engine
 from app.jobs.ticket_analysis_handler import TicketAnalysisJobHandler
+from app.messaging.kafka import KafkaAnalysisCompletedPublisher
 from app.messaging.rabbitmq import RabbitMQTicketAnalysisConsumer
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,11 @@ def create_consumer() -> RabbitMQTicketAnalysisConsumer:
         get_ticket_analysis_service(get_llm_client()),
         model_name=settings.gemini_model,
     )
-    return RabbitMQTicketAnalysisConsumer(handler)
+    publisher = KafkaAnalysisCompletedPublisher(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        topic=settings.analysis_completed_topic,
+    )
+    return RabbitMQTicketAnalysisConsumer(handler, publisher)
 
 
 async def run_worker(stop_event: asyncio.Event) -> None:

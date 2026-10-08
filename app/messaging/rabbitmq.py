@@ -19,6 +19,7 @@ from app.jobs.ticket_analysis_handler import TicketAnalysisJobHandler, TicketNot
 from app.llm.exceptions import LLMRateLimitError, LLMTimeoutError
 from app.models.document import DocumentStatus
 from app.parsers.document import DocumentParseError
+from app.services.analysis_completed_publisher import AnalysisCompletedPublisher
 from app.services.document_ingestion_service import NoExtractableTextError
 
 logger = logging.getLogger(__name__)
@@ -213,10 +214,13 @@ class RabbitMQDocumentIngestionConsumer:
 
 
 class RabbitMQTicketAnalysisConsumer:
-    """Analyze one delivered ticket ID and settle the RabbitMQ message."""
+    """Analyze, publish completion, then settle the RabbitMQ delivery."""
 
-    def __init__(self, handler: TicketAnalysisJobHandler) -> None:
+    def __init__(
+        self, handler: TicketAnalysisJobHandler, completed_publisher: AnalysisCompletedPublisher
+    ) -> None:
         self._handler = handler
+        self._completed_publisher = completed_publisher
 
     async def process_message(self, message: AbstractIncomingMessage) -> None:
         try:
@@ -231,7 +235,7 @@ class RabbitMQTicketAnalysisConsumer:
 
         for attempt in range(1, _MAX_HANDLER_ATTEMPTS + 1):
             try:
-                await self._handler.handle(ticket_id)
+                completed = await self._handler.handle(ticket_id)
             except TicketNotFoundError:
                 logger.exception(
                     "Ticket %s not found for analysis message %s",
@@ -264,6 +268,32 @@ class RabbitMQTicketAnalysisConsumer:
                     attempt,
                 )
                 await message.reject(requeue=False)
+                return
+            else:
+                break
+
+        for attempt in range(1, _MAX_HANDLER_ATTEMPTS + 1):
+            try:
+                await self._completed_publisher.publish(completed)
+            except Exception:
+                if attempt < _MAX_HANDLER_ATTEMPTS:
+                    logger.warning(
+                        "Could not publish analysis.completed for ticket %s "
+                        "(attempt %s/%s); retrying in %s seconds",
+                        ticket_id,
+                        attempt,
+                        _MAX_HANDLER_ATTEMPTS,
+                        _RETRY_DELAY_SECONDS,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(_RETRY_DELAY_SECONDS)
+                    continue
+                logger.exception(
+                    "Could not publish analysis.completed for ticket %s; "
+                    "requeueing RabbitMQ delivery",
+                    ticket_id,
+                )
+                await message.nack(requeue=True)
                 return
             else:
                 break

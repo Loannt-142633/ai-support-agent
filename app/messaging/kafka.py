@@ -1,4 +1,4 @@
-"""Kafka transport for ticket-created events."""
+"""Kafka transports for ticket lifecycle events."""
 
 import json
 import logging
@@ -7,6 +7,7 @@ from uuid import UUID
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer  # type: ignore[import-untyped]
 from aiokafka.structs import ConsumerRecord, TopicPartition  # type: ignore[import-untyped]
 
+from app.services.analysis_completed_publisher import AnalysisCompleted
 from app.services.ticket_created_publisher import TicketCreated
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,45 @@ class KafkaTicketCreatedPublisher:
                 self._topic,
                 key=str(event.ticket_id).encode("utf-8"),
                 value=encode_ticket_created(event),
+            )
+        finally:
+            await producer.stop()
+
+
+def encode_analysis_completed(event: AnalysisCompleted) -> bytes:
+    """Serialize the analysis identity as a versioned Kafka event."""
+
+    return json.dumps(
+        {
+            "version": 1,
+            "ticket_id": str(event.ticket_id),
+            "analysis_id": str(event.analysis_id),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+class KafkaAnalysisCompletedPublisher:
+    """Publish analysis completion with ticket ID as the Kafka message key."""
+
+    def __init__(self, *, bootstrap_servers: str, topic: str) -> None:
+        if not bootstrap_servers.strip() or not topic.strip():
+            raise ValueError("Kafka bootstrap servers and topic must be configured")
+        self._bootstrap_servers = bootstrap_servers
+        self._topic = topic
+
+    async def publish(self, event: AnalysisCompleted) -> None:
+        producer = AIOKafkaProducer(
+            bootstrap_servers=self._bootstrap_servers,
+            acks="all",
+            enable_idempotence=True,
+        )
+        await producer.start()
+        try:
+            await producer.send_and_wait(
+                self._topic,
+                key=str(event.ticket_id).encode("utf-8"),
+                value=encode_analysis_completed(event),
             )
         finally:
             await producer.stop()

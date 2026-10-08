@@ -8,20 +8,28 @@ from app.ticket_worker import create_consumer, run_worker
 
 
 def test_create_consumer_wires_llm_and_job_handler() -> None:
-    settings = SimpleNamespace(gemini_model="test-gemini")
+    settings = SimpleNamespace(
+        gemini_model="test-gemini",
+        kafka_bootstrap_servers="localhost:9092",
+        analysis_completed_topic="analysis.completed",
+    )
     with (
         patch("app.ticket_worker.get_settings", return_value=settings),
         patch("app.ticket_worker.SessionLocal") as sessions,
         patch("app.ticket_worker.get_llm_client") as llm,
         patch("app.ticket_worker.get_ticket_analysis_service") as analysis,
         patch("app.ticket_worker.TicketAnalysisJobHandler") as handler,
+        patch("app.ticket_worker.KafkaAnalysisCompletedPublisher") as publisher,
         patch("app.ticket_worker.RabbitMQTicketAnalysisConsumer") as consumer,
     ):
         result = create_consumer()
 
     analysis.assert_called_once_with(llm.return_value)
     handler.assert_called_once_with(sessions, analysis.return_value, model_name="test-gemini")
-    consumer.assert_called_once_with(handler.return_value)
+    publisher.assert_called_once_with(
+        bootstrap_servers="localhost:9092", topic="analysis.completed"
+    )
+    consumer.assert_called_once_with(handler.return_value, publisher.return_value)
     assert result is consumer.return_value
 
 
