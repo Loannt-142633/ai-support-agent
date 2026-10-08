@@ -150,6 +150,30 @@ services:
       rabbitmq-setup:
         condition: service_completed_successfully
     command: ["python", "-m", "app.ticket_worker"]
+  ticket-notifications:
+    build:
+      context: .
+      target: base
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+    restart: on-failure
+    command: ["python", "-m", "app.kafka_worker", "ticket-notifications"]
+  ticket-metrics:
+    build:
+      context: .
+      target: base
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+    restart: on-failure
+    command: ["python", "-m", "app.kafka_worker", "ticket-metrics"]
 
 volumes:
   postgres_data:

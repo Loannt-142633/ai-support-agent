@@ -1,10 +1,15 @@
 """Kafka transport for ticket-created events."""
 
 import json
+import logging
+from uuid import UUID
 
-from aiokafka import AIOKafkaProducer  # type: ignore[import-untyped]
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer  # type: ignore[import-untyped]
+from aiokafka.structs import ConsumerRecord, TopicPartition  # type: ignore[import-untyped]
 
 from app.services.ticket_created_publisher import TicketCreated
+
+logger = logging.getLogger(__name__)
 
 
 def encode_ticket_created(event: TicketCreated) -> bytes:
@@ -17,6 +22,41 @@ def encode_ticket_created(event: TicketCreated) -> bytes:
         },
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def decode_ticket_created(value: bytes, key: bytes | None) -> TicketCreated:
+    """Read the published contract and verify its ticket ID matches the Kafka key."""
+
+    try:
+        payload = json.loads(value)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("version") != 1
+            or not isinstance(payload.get("ticket_id"), str)
+        ):
+            raise ValueError("Invalid ticket.created event")
+        ticket_id = UUID(payload["ticket_id"])
+        if key != str(ticket_id).encode("utf-8"):
+            raise ValueError("ticket_id does not match Kafka message key")
+        return TicketCreated(ticket_id=ticket_id)
+    except (UnicodeDecodeError, TypeError, ValueError) as error:
+        raise ValueError("Invalid ticket.created event") from error
+
+
+async def log_ticket_created(
+    consumer: AIOKafkaConsumer, message: ConsumerRecord, *, group_id: str
+) -> None:
+    """Log one valid event, then commit exactly its next offset."""
+
+    event = decode_ticket_created(message.value, message.key)
+    logger.info(
+        "ticket_id=%s partition=%s offset=%s group_id=%s",
+        event.ticket_id,
+        message.partition,
+        message.offset,
+        group_id,
+    )
+    await consumer.commit({TopicPartition(message.topic, message.partition): message.offset + 1})
 
 
 class KafkaTicketCreatedPublisher:

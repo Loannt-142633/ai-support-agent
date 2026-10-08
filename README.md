@@ -200,9 +200,16 @@ Compose starts a Kafka broker and creates the `ticket.created` topic with three
 partitions. After a ticket is committed, the API publishes
 `{"version":1,"ticket_id":"<uuid>"}` with the UTF-8 `ticket_id` as the Kafka
 message key. Messages for the same ticket therefore map to the same partition.
-The existing RabbitMQ ticket analysis job is still published separately. This
-step only publishes the Kafka event; notification and statistics consumers are
-not started yet.
+The existing RabbitMQ ticket analysis job is still published separately.
+Two independent workers subscribe to the same topic: `ticket-notifications`
+and `ticket-metrics`. Each currently logs `ticket_id`, partition, offset, and
+group ID, then commits that record's next offset. They do not send notifications
+or calculate metrics yet. If parsing or logging fails, the offset is not
+committed, so the worker exits and Compose restarts it for replay.
+
+Inspect the workers with `docker compose logs -f ticket-notifications
+ticket-metrics` after creating a ticket. Both groups receive every new event;
+`auto_offset_reset=earliest` also lets a new group replay retained events.
 
 Inside Compose, `KAFKA_BOOTSTRAP_SERVERS` is `kafka:9092`. For a host Python
 process, set it to `localhost:9094`. The topic name can be set with
